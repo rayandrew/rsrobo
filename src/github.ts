@@ -11,6 +11,8 @@ export type Pr = {
   base: string;
   head: string;
   html_url: string;
+  head_ref: string;
+  head_repo: string;
   files: PrFile[];
 };
 
@@ -32,6 +34,8 @@ export function fetchPr(owner: string, repo: string, number: number): Pr {
     base: p.base.sha,
     head: p.head.sha,
     html_url: p.html_url,
+    head_ref: p.head.ref,
+    head_repo: p.head.repo.full_name,
     files,
   };
 }

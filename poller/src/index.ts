@@ -89,6 +89,10 @@ async function handle(env: Env, n: Notification, c: Comment) {
     await dispatch(env, inputs);
     return;
   }
+  if (spec.task === "init-notes") {
+    await dispatch(env, { repo, pr: String(pr), task: "init-notes" });
+    return;
+  }
   if (spec.task !== "review") {
     await inbox(
       env,

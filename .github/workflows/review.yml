@@ -9,9 +9,9 @@ on:
       budget: { description: "USD cap", default: "3" }
       focus: { description: "focus areas", default: "" }
       effort: { description: "low | medium | high", default: "high" }
-      task: { description: "review | fix", default: "review" }
+      task: { description: "review | fix | init-notes", default: "review" }
       findings: { description: "fix only: 2,3 or all", default: "" }
-      via: { description: "fix only: patch | suggest", default: "patch" }
+      via: { description: "fix only: patch | suggest | stacked | push", default: "patch" }
 concurrency:
   group: review-${{ inputs.repo }}-${{ inputs.pr }}
   cancel-in-progress: true
@@ -43,7 +43,9 @@ jobs:
       - run: npm ci
       - run: npm i -g @anthropic-ai/claude-code
       - run: |
-          if [ "$TASK" = fix ]; then
+          if [ "$TASK" = init-notes ]; then
+            node src/cli.ts init-notes "$REPO" --notes "$RSROBO_NOTES_DIR" --model "$MODEL" --budget "$BUDGET"
+          elif [ "$TASK" = fix ]; then
             node src/cli.ts fix "$REPO#$PR" "$FINDINGS" --via "$VIA" --model "$MODEL" --budget "$BUDGET" --post inbox
           else
             node src/cli.ts review "$REPO#$PR" --post "$POST" --model "$MODEL" --budget "$BUDGET" --effort "$EFFORT" ${FOCUS:+--focus "$FOCUS"}
@@ -69,11 +71,12 @@ jobs:
         run: |
           git config user.name rsrobo
           git config user.email rsrobo@users.noreply.github.com
-          git add reviews
-          if ! git diff --cached --quiet; then git commit -qm "review: $REPO#$PR" && git push -q; fi
+          git add -A
+          if ! git diff --cached --quiet; then git commit -qm "rsrobo: $TASK $REPO#$PR" && git push -q; fi
         env:
           REPO: ${{ inputs.repo }}
           PR: ${{ inputs.pr }}
+          TASK: ${{ inputs.task }}
       - if: failure()
         run: |
           gh issue create -R "$INBOX_REPO" -l rsrobo -t "rsrobo: review failed for $REPO#$PR" \

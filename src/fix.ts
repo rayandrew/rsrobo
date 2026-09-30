@@ -5,7 +5,7 @@ import { commentableLines, inDiff, parseHunks } from "./diff.ts";
 import type { Pr } from "./github.ts";
 import { type Finding, permalinkWhere, type Result } from "./review.ts";
 
-export type Via = "patch" | "suggest";
+export type Via = "patch" | "suggest" | "stacked" | "push";
 
 // The latest saved review for this PR: the notes repo first, then the local work dir.
 export function loadFindings(pr: Pr, notesDir: string | undefined, workDir: string): Result {
@@ -138,6 +138,56 @@ export const fixMd = (pr: Pr, f: Finding, patch: string, note: string, applies: 
     .filter(Boolean)
     .join("\n\n");
 };
+
+// Applies the patch on the checkout, records it with the trailer, and delivers it: `push` onto the PR's own
+// branch, `stacked` onto a new branch in the base repository with a PR against the PR branch. Returns the URL.
+export function deliverCommit(
+  dir: string,
+  pr: Pr,
+  f: Finding,
+  n: number,
+  patch: string,
+  via: "stacked" | "push",
+  token: string,
+  trailer: string,
+): string {
+  const git = (...a: string[]) => execFileSync("git", ["-C", dir, ...a], { encoding: "utf8", maxBuffer: 64 << 20 });
+  execFileSync("git", ["-C", dir, "apply", "--index", "-"], { input: patch });
+  const branch = via === "push" ? pr.head_ref : `rsrobo/fix-${pr.number}-${n}`;
+  const remote = via === "push" ? pr.head_repo : `${pr.owner}/${pr.repo}`;
+  git("checkout", "-q", "-B", branch);
+  git(
+    "-c",
+    "user.name=rsrobo",
+    "-c",
+    "user.email=rsrobo@users.noreply.github.com",
+    "commit",
+    "-q",
+    "-m",
+    `fix: ${f.title}\n\n${trailer}`,
+  );
+  git("push", "-q", `https://x-access-token:${token}@github.com/${remote}.git`, `HEAD:refs/heads/${branch}`);
+  if (via === "push") return `${pr.html_url}/commits/${git("rev-parse", "HEAD").trim()}`;
+  const body = `Applies finding ${n} from the rsrobo review of #${pr.number}: ${f.title}.\n\n${f.problem}\n\nFix: ${f.fix}`;
+  return execFileSync(
+    "gh",
+    [
+      "pr",
+      "create",
+      "-R",
+      `${pr.owner}/${pr.repo}`,
+      "--base",
+      pr.head_ref,
+      "--head",
+      branch,
+      "--title",
+      `fix: ${f.title}`,
+      "--body",
+      body,
+    ],
+    { encoding: "utf8", env: { ...process.env, GH_TOKEN: token } },
+  ).trim();
+}
 
 function fail(msg: string): never {
   throw new Error(msg);

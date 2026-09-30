@@ -13,6 +13,8 @@ const pr: Pr = {
   base: "b".repeat(40),
   head: "a".repeat(40),
   html_url: "u",
+  head_ref: "feat",
+  head_repo: "o/r",
   files: [],
 };
 const f = (file: string, line: number, severity: Finding["severity"], title: string): Finding => ({

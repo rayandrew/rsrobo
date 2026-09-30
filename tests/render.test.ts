@@ -15,6 +15,8 @@ const pr: Pr = {
   base: "b".repeat(40),
   head: "a".repeat(40),
   html_url: "https://github.com/o/r/pull/7",
+  head_ref: "feat",
+  head_repo: "o/r",
   files: [],
 };
 const result: Result = {

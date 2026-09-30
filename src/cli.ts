@@ -6,7 +6,18 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { ciReport } from "./ci.ts";
 import { compareMd } from "./compare.ts";
-import { fixMd, loadFindings, patchApplies, pick, runFix, type Suggestion, suggestions, type Via } from "./fix.ts";
+import {
+  deliverCommit,
+  fixMd,
+  loadFindings,
+  patchApplies,
+  pick,
+  runFix,
+  type Suggestion,
+  suggestions,
+  type Via,
+} from "./fix.ts";
+import { runGate } from "./gate.ts";
 import { checkout, cloneDefault, fetchPr } from "./github.ts";
 import { pruneKb, type Sensitivity } from "./kb.ts";
 import {
@@ -23,7 +34,7 @@ import { initNotes, prepare, render, runReview, type Severity, saveReview } from
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const config = JSON.parse(readFileSync(join(root, "config.json"), "utf8"));
 const usage =
-  "usage: rsrobo review owner/repo#N [--model alias] [--verify alias] [--budget usd] [--effort high] [--focus a,b] [--min-severity P2] [--notes dir] [--skills dir] [--post pending|review|inbox|comment] [--save dir] [--kb dir] [--json]\n       rsrobo compare owner/repo#N --models a,b [--effort high] [--budget usd] [--kb dir]\n       rsrobo fix owner/repo#N 2,3|all [--via patch|suggest] [--model alias] [--post]\n       rsrobo init-notes owner/repo [--notes dir] [--force]";
+  "usage: rsrobo review owner/repo#N [--model alias] [--verify alias] [--budget usd] [--effort high] [--focus a,b] [--min-severity P2] [--notes dir] [--skills dir] [--post pending|review|inbox|comment] [--save dir] [--kb dir] [--json]\n       rsrobo compare owner/repo#N --models a,b [--effort high] [--budget usd] [--kb dir]\n       rsrobo fix owner/repo#N 2,3|all [--via patch|suggest|stacked|push] [--model alias] [--post]\n       rsrobo init-notes owner/repo [--notes dir] [--force]";
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -106,12 +117,18 @@ if (task === "compare") {
 const modelAlias = values.model ?? fail(usage);
 
 const pr = fetchPr(owner, repo, Number(number));
+const repoConfig = Object.entries(config.repos as Record<string, { kb?: Sensitivity[]; fix?: Via[] }>).find(([g]) =>
+  new RegExp(`^${g.replace(/\*/g, "[^/]*")}$`).test(`${owner}/${repo}`),
+)?.[1];
 
 // fix: apply chosen findings from the latest saved review, deliver as a patch or as suggestion blocks.
 if (task === "fix") {
   const spec = positionals[2] ?? fail(usage);
   const via = values.via as Via;
-  if (!["patch", "suggest"].includes(via)) fail(usage);
+  if (!["patch", "suggest", "stacked", "push"].includes(via)) fail(usage);
+  const allowedVia: Via[] = repoConfig?.fix ?? ["patch", "suggest"];
+  if (!allowedVia.includes(via))
+    fail(`via=${via} is not allowed on ${owner}/${repo}; allowed: ${allowedVia.join(", ")}`);
   const dir = checkout(pr, values.work);
   prepare(dir, pr, values.notes);
   const saved = loadFindings(pr, values.save || undefined, dir);
@@ -126,10 +143,28 @@ if (task === "fix") {
       budgetUsd: Math.min(Number(values.budget), config.max_budget_usd),
       promptsDir: join(root, "prompts"),
     });
-    execFileSync("git", ["-C", dir, "checkout", "-q", "--", "."]);
-    execFileSync("git", ["-C", dir, "clean", "-qfd", "-e", ".rsrobo", "-e", "CLAUDE.md", "-e", ".claude"]);
+    const reset = () => {
+      execFileSync("git", ["-C", dir, "checkout", "-q", "--", "."]);
+      execFileSync("git", ["-C", dir, "clean", "-qfd", "-e", ".rsrobo", "-e", "CLAUDE.md", "-e", ".claude"]);
+    };
+    reset();
     const applies = patchApplies(dir, patch);
-    parts.push(fixMd(pr, f, patch, note, applies));
+    let extra = "";
+    if ((via === "stacked" || via === "push") && applies) {
+      execFileSync("git", ["-C", dir, "apply", "-"], { input: patch });
+      const gate = runGate(dir);
+      reset();
+      extra = `Gate: ${gate.status}${gate.command ? ` (\`${gate.command}\`)` : ""}.`;
+      if (gate.status === "fail") {
+        extra += `\n\n\`\`\`text\n${gate.output.trim().split("\n").slice(-40).join("\n")}\n\`\`\``;
+      } else if (values.post) {
+        const token = process.env.GH_TOKEN ?? execFileSync("gh", ["auth", "token"], { encoding: "utf8" }).trim();
+        const n = saved.findings.indexOf(f) + 1;
+        extra += ` Delivered: ${deliverCommit(dir, pr, f, n, patch, via, token, config.commit_trailer)}`;
+        execFileSync("git", ["-C", dir, "checkout", "-q", pr.head]);
+      }
+    }
+    parts.push([fixMd(pr, f, patch, note, applies), extra].filter(Boolean).join("\n\n"));
     if (via === "suggest" && applies) {
       const s = suggestions(prPatch, patch);
       comments = comments.concat(s.comments);
@@ -159,9 +194,6 @@ if (task === "fix") {
   console.log(urls.filter(Boolean).join("\n"));
   process.exit(0);
 }
-const repoConfig = Object.entries(config.repos as Record<string, { kb?: Sensitivity[] }>).find(([g]) =>
-  new RegExp(`^${g.replace(/\*/g, "[^/]*")}$`).test(`${owner}/${repo}`),
-)?.[1];
 if (values.kb) {
   const { kept, removed } = pruneKb(values.kb, repoConfig?.kb ?? ["public"]);
   console.error(`kb: ${kept} lessons kept, ${removed} removed`);
