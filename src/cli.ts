@@ -390,10 +390,21 @@ if (task === "fix") {
     process.exit(0);
   }
   const userToken = process.env.GH_TOKEN ?? execFileSync("gh", ["auth", "token"], { encoding: "utf8" }).trim();
-  const urls = [commentInbox(pr, userToken, config.inbox_repo, body)];
+  // The fix report goes to the notes repo beside the review; the run summary prints its path.
+  const urls: (string | null)[] = [];
+  if (values.save) {
+    const dir2 = join(values.save, "reviews", pr.owner, pr.repo, String(pr.number));
+    mkdirSync(dir2, { recursive: true });
+    const file = join(
+      dir2,
+      `fix-${spec.replace(/[^\w]/g, "_")}-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")}.md`,
+    );
+    writeFileSync(file, `${pr.html_url} at ${pr.head}\n\n${body}\n`);
+    urls.push(file);
+  } else urls.push(commentInbox(pr, userToken, config.inbox_repo, body));
   if (via === "suggest" && comments.length) {
     const note = leftover
-      ? ` ${leftover} hunk${leftover === 1 ? "" : "s"} outside the diff or too large; see the inbox patch.`
+      ? ` ${leftover} hunk${leftover === 1 ? "" : "s"} outside the diff or too large; see the fix file in the notes repo.`
       : "";
     urls.push(
       postSuggestions(
@@ -471,7 +482,7 @@ if (values.requester) result.requester = values.requester;
 writeFileSync(join(dir, ".rsrobo", "review.json"), JSON.stringify(result, null, 2));
 const minSeverity = values["min-severity"] as Severity;
 
-if (values.save) saveReview(values.save, pr, result, minSeverity);
+const savedFile = values.save ? saveReview(values.save, pr, result, minSeverity) : "(not saved)";
 
 // When posting, stdout carries only the URL and the footer: workflow logs on the public hub must not show findings.
 if (values.post) {
@@ -484,8 +495,8 @@ if (values.post) {
   }[values.post as PostMode];
   if (!url) fail(usage);
   const posted = url();
-  // Every run also lands in the inbox, so the notes repo keeps a copy of each review.
-  const archived = values.post === "inbox" ? posted : postInbox(pr, result, userToken, config.inbox_repo);
+  // The notes repo keeps the copy of each review; an inbox issue exists only when `post=inbox` asks for one.
+  const archived = savedFile;
   // Lessons are written into the kb by `rsrobo lessons` in a separate, serialized job; here they are proposed.
   if (result.lessons.length) {
     postLessons(
