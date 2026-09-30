@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Pr, permalink } from "./github.ts";
 
@@ -234,3 +234,20 @@ const where = (pr: Pr, f: Finding) => {
   const span = f.line_end > f.line_start ? `${f.line_start}-${f.line_end}` : `${f.line_start}`;
   return `[${name}:${span}](${permalink(pr, f.file, f.line_start, f.line_end)})`;
 };
+
+// Writes reviews/<owner>/<repo>/<pr>/<time>-<head7>.md and .json, one pair per run. Returns the markdown path.
+export function saveReview(
+  notesDir: string,
+  pr: Pr,
+  r: Result,
+  minSeverity: Severity = "P3",
+  now = new Date(),
+): string {
+  const dir = join(notesDir, "reviews", pr.owner, pr.repo, String(pr.number));
+  const name = `${now.toISOString().slice(0, 16).replace(/[:T]/g, "-")}-${pr.head.slice(0, 7)}`;
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, `${name}.md`);
+  writeFileSync(file, `${pr.html_url} at ${pr.head}\n\n${render(pr, r, minSeverity)}\n`);
+  writeFileSync(join(dir, `${name}.json`), JSON.stringify({ pr: pr.html_url, head: pr.head, ...r }, null, 2));
+  return file;
+}

@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import type { Pr } from "../src/github.ts";
-import { type Result, render } from "../src/review.ts";
+import { type Result, render, saveReview } from "../src/review.ts";
 
 const pr: Pr = {
   owner: "o",
@@ -69,4 +72,17 @@ test("code refs in prose become links", () => {
 
 test("render with no findings", () => {
   assert.match(render(pr, { ...result, findings: [] }), /> \[!TIP\]\n> \*\*Looks good\.\*\* No findings in 2 files/);
+});
+
+test("saveReview writes one md and one json per run in the PR folder", () => {
+  const dir = mkdtempSync(join(tmpdir(), "rsrobo-"));
+  const a = saveReview(dir, pr, result, "P3", new Date("2026-09-30T10:00:00Z"));
+  saveReview(dir, pr, result, "P3", new Date("2026-09-30T11:00:00Z"));
+  assert.match(readFileSync(a, "utf8"), /^https:\/\/github.com\/o\/r\/pull\/7 at a{40}\n\n> \[!CAUTION\]/);
+  assert.deepEqual(readdirSync(join(dir, "reviews", "o", "r", "7")).sort(), [
+    "2026-09-30-10-00-aaaaaaa.json",
+    "2026-09-30-10-00-aaaaaaa.md",
+    "2026-09-30-11-00-aaaaaaa.json",
+    "2026-09-30-11-00-aaaaaaa.md",
+  ]);
 });

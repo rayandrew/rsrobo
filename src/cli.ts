@@ -6,12 +6,12 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { checkout, fetchPr } from "./github.ts";
 import { type PostMode, postComment, postInbox, postReview } from "./post.ts";
-import { prepare, render, runReview, type Severity } from "./review.ts";
+import { prepare, render, runReview, type Severity, saveReview } from "./review.ts";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const config = JSON.parse(readFileSync(join(root, "config.json"), "utf8"));
 const usage =
-  "usage: rsrobo review owner/repo#N [--model alias] [--verify alias] [--budget usd] [--effort high] [--focus a,b] [--min-severity P2] [--notes dir] [--skills dir] [--post pending|review|inbox|comment] [--json]";
+  "usage: rsrobo review owner/repo#N [--model alias] [--verify alias] [--budget usd] [--effort high] [--focus a,b] [--min-severity P2] [--notes dir] [--skills dir] [--post pending|review|inbox|comment] [--save dir] [--json]";
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -25,6 +25,7 @@ const { values, positionals } = parseArgs({
     notes: { type: "string", default: process.env.RSROBO_NOTES_DIR },
     skills: { type: "string", default: process.env.RSROBO_SKILLS_DIR },
     post: { type: "string" },
+    save: { type: "string", default: process.env.RSROBO_NOTES_DIR },
     json: { type: "boolean", default: false },
   },
 });
@@ -52,6 +53,8 @@ const result = runReview(dir, pr, {
 writeFileSync(join(dir, ".rsrobo", "review.json"), JSON.stringify(result, null, 2));
 const minSeverity = values["min-severity"] as Severity;
 
+if (values.save) saveReview(values.save, pr, result, minSeverity);
+
 // When posting, stdout carries only the URL and the footer: workflow logs on the public hub must not show findings.
 if (values.post) {
   const userToken = process.env.GH_TOKEN ?? execFileSync("gh", ["auth", "token"], { encoding: "utf8" }).trim();
@@ -62,7 +65,12 @@ if (values.post) {
     comment: () => postComment(pr, result, botToken(), config.bot_login),
   }[values.post as PostMode];
   if (!url) fail(usage);
-  console.log(`${url()}\n${result.findings.length} findings, $${result.cost_usd.toFixed(2)}, ${result.seconds}s`);
+  const posted = url();
+  // Every run also lands in the inbox, so the notes repo keeps a copy of each review.
+  const archived = values.post === "inbox" ? posted : postInbox(pr, result, userToken, config.inbox_repo);
+  console.log(
+    `${posted}\n${archived}\n${result.findings.length} findings, $${result.cost_usd.toFixed(2)}, ${result.seconds}s`,
+  );
 } else {
   console.log(values.json ? JSON.stringify(result, null, 2) : render(pr, result, minSeverity));
 }

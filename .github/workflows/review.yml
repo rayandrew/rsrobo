@@ -41,6 +41,16 @@ jobs:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           RSROBO_NOTES_DIR: ${{ github.workspace }}/notes
+      - if: always()
+        working-directory: notes
+        run: |
+          git config user.name rsrobo
+          git config user.email rsrobo@users.noreply.github.com
+          git add reviews
+          if ! git diff --cached --quiet; then git commit -qm "review: $REPO#$PR" && git push -q; fi
+        env:
+          REPO: ${{ inputs.repo }}
+          PR: ${{ inputs.pr }}
       - if: failure()
         run: |
           gh issue create -R "$INBOX_REPO" -l rsrobo -t "rsrobo: review failed for $REPO#$PR" \
