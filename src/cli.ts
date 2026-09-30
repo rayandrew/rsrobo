@@ -4,7 +4,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { askRepo } from "./ask.ts";
+import type { Engine } from "./agent.ts";
+import { askRepo, decorate } from "./ask.ts";
+import { type BenchRun, benchMd, lastRun, loadCases, saveRun, score } from "./bench.ts";
 import { ciReport } from "./ci.ts";
 import { compareMd } from "./compare.ts";
 import { runReviewPi } from "./engine-pi.ts";
@@ -22,6 +24,7 @@ import {
 import { runGate } from "./gate.ts";
 import { checkout, cloneDefault, fetchPr } from "./github.ts";
 import { pruneKb, type Sensitivity } from "./kb.ts";
+import { ledger, ledgerMd } from "./ledger.ts";
 import {
   commentInbox,
   type PostMode,
@@ -36,6 +39,7 @@ import {
   initNotes,
   type Previous,
   prepare,
+  type Result,
   reconcile,
   render,
   runReview,
@@ -90,7 +94,6 @@ if (task === "models") {
   process.exit(0);
 }
 // An alias is a Claude model id string, or `{ engine: "pi", provider, model }` for the pi engine.
-type Engine = { engine: "claude"; model: string } | { engine: "pi"; provider: string; model: string };
 // Besides aliases, `provider/model` is accepted for the providers in `pi_providers`, so any model pi knows works.
 const resolve = (name: string): Engine => {
   const m = config.models[name];
@@ -107,6 +110,14 @@ const repoPolicy = (owner: string, repo: string): Policy | undefined =>
   Object.entries(config.repos as Record<string, Policy>).find(([g]) =>
     new RegExp(`^${g.replace(/\*/g, "[^/]*")}$`).test(`${owner}/${repo}`),
   )?.[1];
+// Per-repo provider policy: LLNL work must not go to Chinese-origin models, so freeinference is off there.
+const allowedEngine = (e: Engine, owner: string, repo: string): Engine => {
+  const provider = e.engine === "claude" ? "claude" : e.provider;
+  const allowed = repoPolicy(owner, repo)?.providers ?? ["claude", ...config.pi_providers];
+  if (!allowed.includes(provider))
+    fail(`provider ${provider} is not allowed on ${owner}/${repo}; allowed: ${allowed.join(", ")}`);
+  return e;
+};
 const alias = (name: string): string => {
   const e = resolve(name);
   if (e.engine !== "claude") fail(`alias "${name}" runs on pi; this task needs a Claude alias`);
@@ -115,23 +126,43 @@ const alias = (name: string): string => {
 
 // init-notes: draft <notes>/<owner>/<repo>/CLAUDE.md from the default branch. Never overwrites without --force.
 // ask: answer a question about the default branch; --issue N posts the answer there as the bot and copies it to the inbox.
-if (task === "ask") {
+if (task === "ask" || task === "summarize" || task === "triage") {
   const rm = target ? /^([\w.-]+)\/([\w.-]+)$/.exec(target) : null;
-  const question = positionals[2];
+  const canned: Record<string, string> = { summarize: "Summarize this pull request.", triage: "Triage this issue." };
+  const question = positionals[2] ?? canned[task] ?? "";
   if (!rm || !question) fail(usage);
+  if (task !== "ask" && !values.issue) fail(`${task} needs --issue N`);
   const [, owner, repo] = rm;
   const dir = cloneDefault(owner, repo, values.work);
   prepare(dir, { owner, repo } as Parameters<typeof prepare>[1], values.notes);
   if (values.kb) pruneKb(values.kb, repoPolicy(owner, repo)?.kb ?? ["public", "internal"]);
-  const { md, cost_usd, seconds } = askRepo(dir, owner, repo, question, {
+  const engine = allowedEngine(
+    resolve(values.model === config.default_model ? config.ask_model : (values.model ?? config.ask_model)),
+    owner,
+    repo,
+  );
+  const { md, cost_usd, seconds, issue } = askRepo(dir, owner, repo, question, {
     issue: values.issue ? Number(values.issue) : undefined,
-    model: alias(values.model === config.default_model ? config.ask_model : (values.model ?? config.ask_model)),
+    engine: allowedEngine(
+      resolve(values.model === config.default_model ? config.ask_model : (values.model ?? config.ask_model)),
+      owner,
+      repo,
+    ),
     budgetUsd: Math.min(Number(values.budget), config.max_budget_usd),
     effort: values.effort ?? "medium",
     promptsDir: join(root, "prompts"),
     kbDir: values.kb,
+    mode: task,
   });
-  const body = `${md}\n\n<sub>rsrobo, ${config.ask_model}, $${cost_usd.toFixed(2)}, ${seconds}s. Asked by @${values.requester ?? "me"}: ${question}</sub>`;
+  const body = decorate(md, {
+    mode: task,
+    question,
+    model: engine.model,
+    cost_usd,
+    seconds,
+    requester: values.requester,
+    issue,
+  });
   if (values.issue && values.post) {
     const userToken = process.env.GH_TOKEN ?? execFileSync("gh", ["auth", "token"], { encoding: "utf8" }).trim();
     const url = `repos/${owner}/${repo}/issues/${values.issue}/comments`;
@@ -171,7 +202,7 @@ if (task === "init-notes") {
   const [, owner, repo] = rm;
   const dir = cloneDefault(owner, repo, values.work);
   const { md, cost_usd } = initNotes(dir, {
-    model: alias(values.model ?? fail(usage)),
+    engine: allowedEngine(resolve(values.model ?? fail(usage)), owner, repo),
     budgetUsd: Math.min(Number(values.budget), config.max_budget_usd),
     promptsDir: join(root, "prompts"),
   });
@@ -184,6 +215,63 @@ if (task === "init-notes") {
   } else console.log(md);
   process.exit(0);
 }
+// One review in a child process with its own work dir and no saving; compare and bench fan out over it.
+function childReview(prTarget: string, alias: string, workName: string): Promise<Result> {
+  const args = [process.argv[1], "review", prTarget, "--model", alias, "--json", "--save", ""];
+  if (values.effort) args.push("--effort", values.effort);
+  if (values.budget) args.push("--budget", values.budget);
+  if (values.kb) args.push("--kb", values.kb);
+  const env = { ...process.env, RSROBO_WORK_DIR: join(values.work, workName), RSROBO_NOTES_DIR: "" };
+  return new Promise((ok, no) => {
+    const c = spawn(process.execPath, args, { env, stdio: ["ignore", "pipe", "inherit"] });
+    let s = "";
+    c.stdout.on("data", (d) => {
+      s += d;
+    });
+    c.on("close", (code) =>
+      code === 0 ? ok(JSON.parse(s)) : no(new Error(`${alias} on ${prTarget}: review exited ${code}`)),
+    );
+  });
+}
+
+// bench: every case in <notes>/bench/cases.json through one model, scored against the expected defects.
+if (task === "bench") {
+  const notes = values.save || fail("bench needs --save <notes dir> (or RSROBO_NOTES_DIR)");
+  const cases = loadCases(notes);
+  const alias = values.model ?? config.default_model;
+  const date = new Date().toISOString();
+  const settled = await Promise.allSettled(
+    cases.map((c) => childReview(c.pr, alias, `bench-${c.pr.replace(/[^\w]/g, "_")}`)),
+  );
+  const run: BenchRun = {
+    date,
+    model: resolve(alias).model,
+    effort: values.effort ?? "high",
+    cases: cases.flatMap((c, i) => {
+      const s = settled[i];
+      if (s.status === "rejected") {
+        console.error(String(s.reason));
+        return [];
+      }
+      return [score(c, s.value)];
+    }),
+  };
+  if (!run.cases.length) fail("every case failed");
+  const file = saveRun(notes, run);
+  console.log(benchMd(run, lastRun(notes, run.model, date)));
+  console.error(file);
+  process.exit(0);
+}
+
+// ledger: monthly cost per repo and model from the saved reviews, written to <notes>/ledger.md.
+if (task === "ledger") {
+  const notes = values.save || fail("ledger needs --save <notes dir> (or RSROBO_NOTES_DIR)");
+  const md = ledgerMd(ledger(notes));
+  writeFileSync(join(notes, "ledger.md"), md);
+  console.log(md);
+  process.exit(0);
+}
+
 const m =
   ["review", "compare", "fix"].includes(task ?? "") && target ? /^([\w.-]+)\/([\w.-]+)#(\d+)$/.exec(target) : null;
 if (!m) fail(usage);
@@ -193,22 +281,7 @@ const [, owner, repo, number] = m;
 if (task === "compare") {
   const aliases = (values.models ?? fail("compare needs --models a,b")).split(",");
   const settled = await Promise.allSettled(
-    aliases.map(async (alias) => {
-      const args = [process.argv[1], "review", target, "--model", alias, "--json", "--save", ""];
-      if (values.effort) args.push("--effort", values.effort);
-      if (values.budget) args.push("--budget", values.budget);
-      if (values.kb) args.push("--kb", values.kb);
-      const env = { ...process.env, RSROBO_WORK_DIR: join(values.work, `compare-${alias}`), RSROBO_NOTES_DIR: "" };
-      const out = await new Promise<string>((ok, no) => {
-        const c = spawn(process.execPath, args, { env, stdio: ["ignore", "pipe", "inherit"] });
-        let s = "";
-        c.stdout.on("data", (d) => {
-          s += d;
-        });
-        c.on("close", (code) => (code === 0 ? ok(s) : no(new Error(`${alias}: review exited ${code}`))));
-      });
-      return { alias, result: JSON.parse(out) };
-    }),
+    aliases.map(async (alias) => ({ alias, result: await childReview(target, alias, `compare-${alias}`) })),
   );
   const runs = settled.flatMap((s) => (s.status === "fulfilled" ? [s.value] : []));
   for (const s of settled) if (s.status === "rejected") console.error(String(s.reason));
@@ -239,7 +312,7 @@ if (task === "fix") {
   let leftover = 0;
   for (const f of chosen) {
     const { patch, note } = runFix(dir, pr, f, {
-      model: alias(modelAlias),
+      engine: allowedEngine(resolve(modelAlias), owner, repo),
       budgetUsd: Math.min(Number(values.budget), config.max_budget_usd),
       promptsDir: join(root, "prompts"),
     });
@@ -312,13 +385,7 @@ for (const [name, make] of [
 }
 const engine = resolve(modelAlias);
 const verifyEngine = resolve(values.verify ?? modelAlias);
-// Per-repo provider policy: LLNL work must not go to Chinese-origin models, so freeinference is off there.
-for (const e of [engine, verifyEngine]) {
-  const provider = e.engine === "claude" ? "claude" : e.provider;
-  const allowed = repoConfig?.providers ?? ["claude", ...config.pi_providers];
-  if (!allowed.includes(provider))
-    fail(`provider ${provider} is not allowed on ${owner}/${repo}; allowed: ${allowed.join(", ")}`);
-}
+for (const e of [engine, verifyEngine]) allowedEngine(e, owner, repo);
 // A re-review: load the last saved review of this PR, and write the diff since its head when there is one.
 let previous: Previous | undefined;
 try {

@@ -163,3 +163,38 @@ test("reconcile keeps numbers for findings at the same place and lists the resol
   );
   assert.match(render(pr, r), /Resolved since the last review: #2 minor; #3 gone\./);
 });
+
+test("decorate strips preambles, colors triage by severity, collapses sources", async () => {
+  const { decorate } = await import("../src/ask.ts");
+  const d = {
+    mode: "triage" as const,
+    question: "Triage this issue.",
+    model: "m",
+    cost_usd: 0.1,
+    seconds: 4,
+    requester: "me",
+    issue: { number: 9, title: "Crash" },
+  };
+  const md = decorate(
+    'Based on my analysis:\n\n| Field | Value |\n|---|---|\n| Severity | P1 |\n\n**Evidence.** x\n\nSources: `a/b.c:1`, lesson 1234567890 "t"',
+    d,
+  );
+  assert.match(md, /^> \[!CAUTION\]\n> \*\*Triage\*\* on #9 Crash\n\n\| Field/);
+  assert.doesNotMatch(md, /Based on my analysis/);
+  assert.match(md, /<details><summary>Sources<\/summary>\n\n`a\/b\.c:1`, lesson 1234567890 "t"\n\n<\/details>/);
+  assert.match(md, /<sub>rsrobo triage · `m` · \$0\.10 · 4s · asked by @me<\/sub>$/);
+  assert.match(
+    decorate("Yes. Because.\nSources: x", { ...d, mode: "ask", question: "q?" }),
+    /^> \[!NOTE\]\n> \*\*Answer\*\* on #9 Crash: q\?\n\nYes\. Because\./,
+  );
+});
+
+test("enforceLabels keeps only labels the repository has", async () => {
+  const { enforceLabels } = await import("../src/ask.ts");
+  const t = "| Labels | bug, Performance, `needs-info`, made-up |\n| State | ready |";
+  assert.equal(
+    enforceLabels(t, ["bug", "performance", "needs-info"]),
+    "| Labels | bug, performance, needs-info |\n| State | ready |",
+  );
+  assert.equal(enforceLabels("| Labels | made-up |", ["bug"]), "| Labels | none |");
+});

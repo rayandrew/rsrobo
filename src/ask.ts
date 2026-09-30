@@ -1,10 +1,9 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { type Engine, runAgent } from "./agent.ts";
 import type { Pr } from "./github.ts";
 import { linkify } from "./review.ts";
-
-const KB_TOOLS = ["mcp__rkb__rkb_search", "mcp__rkb__rkb_show"];
 
 // Answers a question about the default-branch checkout. Read-only; returns markdown with linked code refs.
 export function askRepo(
@@ -12,61 +11,42 @@ export function askRepo(
   owner: string,
   repo: string,
   question: string,
-  o: { model: string; budgetUsd: number; effort: string; promptsDir: string; kbDir?: string; issue?: number },
-): { md: string; cost_usd: number; seconds: number } {
+  o: {
+    engine: Engine;
+    budgetUsd: number;
+    effort: string;
+    promptsDir: string;
+    kbDir?: string;
+    issue?: number;
+    mode?: "ask" | "summarize" | "triage";
+  },
+): { md: string; cost_usd: number; seconds: number; issue?: { number: number; title: string } } {
   const head = execFileSync("git", ["-C", dir, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  const mode = o.mode ?? "ask";
+  const labels = mode === "triage" ? repoLabels(owner, repo) : [];
   const prompt = [
-    readFileSync(join(o.promptsDir, "ask.md"), "utf8"),
+    readFileSync(join(o.promptsDir, `${mode}.md`), "utf8"),
     o.issue ? issueContext(owner, repo, o.issue) : "",
+    mode === "summarize" && o.issue ? prDiff(owner, repo, o.issue) : "",
+    mode === "triage" ? `<labels>\n${labels.map((l) => `- ${l}`).join("\n") || "none"}\n</labels>` : "",
     `<question repo="${owner}/${repo}">\n${question}\n</question>`,
   ]
     .filter(Boolean)
     .join("\n\n");
   const t0 = Date.now();
-  const r = spawnSync(
-    "claude",
-    [
-      "-p",
-      prompt,
-      "--output-format",
-      "json",
-      "--no-session-persistence",
-      "--setting-sources",
-      "project",
-      "--tools",
-      "Read,Grep,Glob",
-      "--permission-prompts",
-      "none",
-      "--model",
-      o.model,
-      "--effort",
-      o.effort,
-      "--max-budget-usd",
-      String(o.budgetUsd),
-      ...(o.kbDir
-        ? [
-            "--strict-mcp-config",
-            "--mcp-config",
-            JSON.stringify({ mcpServers: { rkb: { command: "rkb", args: ["mcp"] } } }),
-            "--allowedTools",
-            ...KB_TOOLS,
-          ]
-        : []),
-    ],
-    {
-      cwd: dir,
-      encoding: "utf8",
-      maxBuffer: 64 << 20,
-      env: o.kbDir ? { ...process.env, RKB_HOME: o.kbDir, RKB_PROJECT: repo } : process.env,
-    },
-  );
-  if (r.status !== 0) throw new Error(`claude exited ${r.status}: ${r.stderr}`);
-  const out = JSON.parse(r.stdout);
-  if (out.is_error) throw new Error(`ask failed: ${out.result}`);
+  const out = runAgent(dir, prompt, {
+    engine: o.engine,
+    effort: o.effort,
+    budgetUsd: o.budgetUsd,
+    tools: "read",
+    kb: o.kbDir ? { dir: o.kbDir, project: repo } : undefined,
+  });
   const fake = { owner, repo, head } as Pr;
+  const issue = o.issue ? issueTitle(owner, repo, o.issue) : undefined;
   return {
-    md: linkify(fake, fullPaths(dir, String(out.result).trim())),
-    cost_usd: out.total_cost_usd,
+    issue,
+    md: linkify(fake, fullPaths(dir, mode === "triage" ? enforceLabels(out.text, labels) : out.text)),
+    cost_usd: out.cost_usd,
     seconds: Math.round((Date.now() - t0) / 1000),
   };
 }
@@ -156,3 +136,102 @@ const STOP = new Set([
   "error",
   "bug",
 ]);
+
+// The PR diff for summarize, capped so a huge PR still fits; the model greps the checkout for the rest.
+function prDiff(owner: string, repo: string, number: number, maxBytes = 120_000): string {
+  try {
+    const diff = execFileSync("gh", ["pr", "diff", String(number), "-R", `${owner}/${repo}`], {
+      encoding: "utf8",
+      maxBuffer: 64 << 20,
+    });
+    const cut = diff.length > maxBytes;
+    return `<diff truncated="${cut}">\n${diff.slice(0, maxBytes)}\n</diff>`;
+  } catch {
+    return "";
+  }
+}
+
+// The repository's own label names, so triage suggests names that exist.
+function repoLabels(owner: string, repo: string): string[] {
+  try {
+    const labels = JSON.parse(
+      execFileSync("gh", ["api", "--paginate", "--slurp", `repos/${owner}/${repo}/labels?per_page=100`], {
+        encoding: "utf8",
+      }),
+    ).flat() as { name: string }[];
+    return labels.map((l) => l.name);
+  } catch {
+    return [];
+  }
+}
+
+// Keeps only labels the repository has in the `| Labels | ... |` row, matched exactly, case-insensitive.
+export function enforceLabels(text: string, labels: string[]): string {
+  const byLower = new Map(labels.map((l) => [l.toLowerCase(), l]));
+  return text.replace(/^(\| Labels \| )(.*?)( \|)$/m, (_, pre, cell, post) => {
+    const kept = cell
+      .split(",")
+      .map((x: string) => byLower.get(x.trim().replace(/^`|`$/g, "").toLowerCase()))
+      .filter((x: string | undefined): x is string => !!x);
+    return `${pre}${kept.length ? [...new Set(kept)].join(", ") : "none"}${post}`;
+  });
+}
+
+export type Decor = {
+  mode: "ask" | "summarize" | "triage";
+  question: string;
+  model: string;
+  cost_usd: number;
+  seconds: number;
+  requester?: string;
+  issue?: { number: number; title: string };
+};
+
+// The same shape as a review: a colored header block, the body, sources collapsed, one footer line.
+// Drops any preamble before the first line that carries content.
+export function decorate(text: string, d: Decor): string {
+  const lines = text.split("\n");
+  const start = lines.findIndex((l) => /^(\||\*\*|Yes|No|Partly|Unknown|Not found|`|\[)/.test(l.trim()));
+  const body = (start > 0 ? lines.slice(start) : lines)
+    .join("\n")
+    .replace(/^(\*\*[^*]+\*\*)\s+- /gm, "$1\n- ")
+    .trim();
+  const [main, sources] = splitSources(body);
+  const ref = d.issue ? ` on #${d.issue.number} ${d.issue.title}` : "";
+  const header = {
+    ask: () => `> [!NOTE]\n> **Answer**${ref}: ${d.question}`,
+    summarize: () => `> [!NOTE]\n> **Summary**${ref}`,
+    triage: () => {
+      const sev = /\| Severity \| (P\d)/.exec(main)?.[1];
+      const kind = sev === "P0" || sev === "P1" ? "CAUTION" : sev === "P2" ? "WARNING" : "NOTE";
+      return `> [!${kind}]\n> **Triage**${ref}`;
+    },
+  }[d.mode]();
+  const out = [header, main];
+  if (sources) out.push(`<details><summary>Sources</summary>\n\n${sources}\n\n</details>`);
+  out.push(
+    `<sub>rsrobo ${d.mode} · \`${d.model}\` · $${d.cost_usd.toFixed(2)} · ${d.seconds}s${d.requester ? ` · asked by @${d.requester}` : ""}</sub>`,
+  );
+  return out.join("\n\n");
+}
+
+function splitSources(body: string): [string, string] {
+  const i = body.search(/^Sources:/m);
+  if (i < 0) return [body, ""];
+  return [
+    body.slice(0, i).trim(),
+    body
+      .slice(i)
+      .replace(/^Sources:\s*/, "")
+      .trim(),
+  ];
+}
+
+function issueTitle(owner: string, repo: string, number: number): { number: number; title: string } | undefined {
+  try {
+    const i = JSON.parse(execFileSync("gh", ["api", `repos/${owner}/${repo}/issues/${number}`], { encoding: "utf8" }));
+    return { number, title: i.title };
+  } catch {
+    return undefined;
+  }
+}

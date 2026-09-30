@@ -168,6 +168,12 @@ async function run(env: Env, n: Notification, c: Comment, spec: NonNullable<Retu
     await dispatch(env, inputs);
     return;
   }
+  if (spec.task === "summarize" || spec.task === "triage") {
+    const inputs: Record<string, string> = { repo, pr: String(pr), task: spec.task, requester: c.user.login };
+    if (spec.args.model) inputs.model = spec.args.model;
+    await dispatch(env, inputs);
+    return;
+  }
   if (spec.task === "ask") {
     if (!spec.text) {
       await inbox(env, `rsrobo: empty question on ${repo}#${pr}`, `${c.html_url}\n\nWrite the question after \`ask\`.`);
@@ -185,7 +191,11 @@ async function run(env: Env, n: Notification, c: Comment, spec: NonNullable<Retu
     return;
   }
   if (n.subject.type === "Issue") {
-    await inbox(env, `rsrobo: ${spec.task} needs a pull request`, `${c.html_url}\n\nOn an issue only \`ask\` works.`);
+    await inbox(
+      env,
+      `rsrobo: ${spec.task} needs a pull request`,
+      `${c.html_url}\n\nOn an issue only \`ask\`, \`triage\` and \`summarize\` work.`,
+    );
     return;
   }
   if (spec.task === "init-notes") {

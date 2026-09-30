@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { type Engine, runAgent } from "./agent.ts";
 import { type Pr, permalink } from "./github.ts";
 
 export type Severity = "P0" | "P1" | "P2" | "P3";
@@ -336,36 +337,14 @@ export function saveReview(
 // Drafts the notes CLAUDE.md for a repository from its default-branch checkout. Read-only run; returns the markdown.
 export function initNotes(
   dir: string,
-  o: { model: string; budgetUsd: number; promptsDir: string },
+  o: { engine: Engine; budgetUsd: number; promptsDir: string },
 ): { md: string; cost_usd: number } {
-  const r = spawnSync(
-    "claude",
-    [
-      "-p",
-      "--output-format",
-      "json",
-      "--no-session-persistence",
-      "--setting-sources",
-      "project",
-      "--tools",
-      "Read,Grep,Glob",
-      "--permission-prompts",
-      "none",
-      "--model",
-      o.model,
-      "--effort",
-      "high",
-      "--max-budget-usd",
-      String(o.budgetUsd),
-      readFileSync(join(o.promptsDir, "init-notes.md"), "utf8"),
-    ],
-    { cwd: dir, encoding: "utf8", maxBuffer: 64 << 20 },
-  );
-  if (r.status !== 0) throw new Error(`claude exited ${r.status}: ${r.stderr}`);
-  const out = JSON.parse(r.stdout);
-  if (out.is_error) throw new Error(`init-notes failed: ${out.result}`);
-  const md = String(out.result)
-    .replace(/^```(?:markdown)?\n([\s\S]*?)\n```\s*$/, "$1")
-    .trim();
-  return { md: `${md}\n`, cost_usd: out.total_cost_usd };
+  const out = runAgent(dir, readFileSync(join(o.promptsDir, "init-notes.md"), "utf8"), {
+    engine: o.engine,
+    effort: "high",
+    budgetUsd: o.budgetUsd,
+    tools: "read",
+  });
+  const md = out.text.replace(/^```(?:markdown)?\n([\s\S]*?)\n```\s*$/, "$1").trim();
+  return { md: `${md}\n`, cost_usd: out.cost_usd };
 }

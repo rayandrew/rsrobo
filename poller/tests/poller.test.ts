@@ -127,3 +127,10 @@ test("a stranger's ask on an issue waits for my approve; no model runs before", 
     { repo: "o/r", pr: "7", task: "ask", question: "is this implemented?", requester: "me", model: "haiku" },
   ]);
 });
+
+test("summarize and triage dispatch as their own tasks", async () => {
+  seen.clear();
+  const calls = fakeGitHub([{ id: 9, body: "@rsrobo triage", user: { login: "me" }, html_url: "" }], "Issue");
+  await poll(env);
+  assert.deepEqual(dispatches(calls), [{ repo: "o/r", pr: "7", task: "triage", requester: "me" }]);
+});

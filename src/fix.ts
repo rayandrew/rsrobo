@@ -1,6 +1,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { type Engine, runAgent } from "./agent.ts";
 import { commentableLines, inDiff, parseHunks } from "./diff.ts";
 import type { Pr } from "./github.ts";
 import { type Finding, permalinkWhere, type Result } from "./review.ts";
@@ -35,7 +36,7 @@ export function runFix(
   dir: string,
   pr: Pr,
   f: Finding,
-  o: { model: string; budgetUsd: number; promptsDir: string },
+  o: { engine: Engine; budgetUsd: number; promptsDir: string },
 ): { patch: string; note: string } {
   const prompt = [
     readFileSync(join(o.promptsDir, "fix.md"), "utf8"),
@@ -49,40 +50,12 @@ export function runFix(
   ]
     .filter(Boolean)
     .join("\n");
-  const r = spawnSync(
-    "claude",
-    [
-      "-p",
-      "--output-format",
-      "json",
-      "--no-session-persistence",
-      "--setting-sources",
-      "project",
-      "--tools",
-      "Read,Grep,Glob,Edit,Write",
-      "--allowedTools",
-      "Edit",
-      "Write",
-      "--permission-prompts",
-      "none",
-      "--model",
-      o.model,
-      "--effort",
-      "high",
-      "--max-budget-usd",
-      String(o.budgetUsd),
-      prompt,
-    ],
-    { cwd: dir, encoding: "utf8", maxBuffer: 64 << 20 },
-  );
-  if (r.status !== 0) throw new Error(`claude exited ${r.status}: ${r.stderr}`);
-  const out = JSON.parse(r.stdout);
-  if (out.is_error) throw new Error(`fix failed: ${out.result}`);
+  const out = runAgent(dir, prompt, { engine: o.engine, effort: "high", budgetUsd: o.budgetUsd, tools: "edit" });
   const git = (...a: string[]) => execFileSync("git", ["-C", dir, ...a], { encoding: "utf8", maxBuffer: 64 << 20 });
   git("add", "-A", "--", ".", ":!.rsrobo", ":!CLAUDE.md", ":!.claude");
   const patch = git("diff", "--cached");
   git("reset", "-q");
-  return { patch, note: String(out.result ?? "").trim() };
+  return { patch, note: out.text };
 }
 
 export type Suggestion = {
