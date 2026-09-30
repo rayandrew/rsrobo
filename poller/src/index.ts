@@ -1,6 +1,6 @@
 import { parseCommand } from "../../src/commands.ts";
 
-type Env = {
+export type Env = {
   SEEN: KVNamespace;
   BOT_TOKEN: string;
   USER_TOKEN: string;
@@ -30,7 +30,7 @@ export default {
   },
 };
 
-async function poll(env: Env) {
+export async function poll(env: Env) {
   const notes = (await gh(env.BOT_TOKEN, "/notifications?participating=true")) as Notification[];
   for (const n of notes) {
     if (n.subject.type !== "PullRequest") continue;
@@ -179,7 +179,7 @@ async function run(env: Env, n: Notification, c: Comment, spec: NonNullable<Retu
     );
     return;
   }
-  const inputs: Record<string, string> = { repo, pr: String(pr) };
+  const inputs: Record<string, string> = { repo, pr: String(pr), requester: c.user.login };
   for (const k of ["post", "model", "budget", "focus", "effort"]) if (spec.args[k]) inputs[k] = spec.args[k];
   if (spec.text) inputs.focus = [inputs.focus, spec.text].filter(Boolean).join("; ");
   await dispatch(env, inputs);

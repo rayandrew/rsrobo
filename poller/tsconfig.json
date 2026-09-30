@@ -1,5 +1,5 @@
 {
   "extends": "../tsconfig.json",
-  "compilerOptions": { "types": ["@cloudflare/workers-types"], "lib": ["esnext"] },
-  "include": ["src", "../src/commands.ts"]
+  "compilerOptions": { "types": ["@cloudflare/workers-types", "node"], "lib": ["esnext"] },
+  "include": ["src", "tests", "../src/commands.ts"]
 }

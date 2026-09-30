@@ -7,11 +7,11 @@
   },
   "scripts": {
     "rsrobo": "node src/cli.ts",
-    "test": "node --test tests/*.test.ts",
+    "test": "node --test tests/*.test.ts poller/tests/*.test.ts",
     "lint": "biome check",
     "fix": "biome check --write",
     "typecheck": "tsc && tsc -p poller",
-    "check": "biome check && tsc && tsc -p poller && node --test tests/*.test.ts",
+    "check": "biome check && tsc && tsc -p poller && node --test tests/*.test.ts poller/tests/*.test.ts",
     "deploy": "wrangler deploy -c poller/wrangler.toml"
   },
   "engines": {

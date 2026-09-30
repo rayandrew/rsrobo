@@ -21,7 +21,14 @@ export type Change = { area: string; change: string };
 
 export type Review = { map: string; changes: Change[]; findings: Finding[]; skipped: string[]; lessons: string[] };
 
-export type Result = Review & { model: string; effort: string; cost_usd: number; seconds: number; files: number };
+export type Result = Review & {
+  model: string;
+  effort: string;
+  cost_usd: number;
+  seconds: number;
+  files: number;
+  requester?: string;
+};
 
 export const reviewSchema = {
   type: "object",
@@ -265,8 +272,21 @@ export function saveReview(
   const name = `${now.toISOString().slice(0, 16).replace(/[:T]/g, "-")}-${pr.head.slice(0, 7)}`;
   mkdirSync(dir, { recursive: true });
   const file = join(dir, `${name}.md`);
-  writeFileSync(file, `${pr.html_url} at ${pr.head}\n\n${render(pr, r, minSeverity)}\n`);
-  writeFileSync(join(dir, `${name}.json`), JSON.stringify({ pr: pr.html_url, head: pr.head, ...r }, null, 2));
+  const at = (logins: string[]) => logins.map((l) => `@${l}`).join(", ");
+  const who = [
+    `- author: @${pr.author}`,
+    pr.people.contributors.length ? `- commits: ${at(pr.people.contributors)}` : "",
+    pr.people.commenters.length ? `- comments: ${at(pr.people.commenters)}` : "",
+    pr.people.reviewers.length ? `- reviews: ${at(pr.people.reviewers)}` : "",
+    r.requester ? `- run asked by: @${r.requester}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  writeFileSync(file, `${pr.html_url} at ${pr.head}\n\n${who}\n\n${render(pr, r, minSeverity)}\n`);
+  writeFileSync(
+    join(dir, `${name}.json`),
+    JSON.stringify({ pr: pr.html_url, head: pr.head, author: pr.author, people: pr.people, ...r }, null, 2),
+  );
   return file;
 }
 

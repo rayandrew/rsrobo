@@ -15,6 +15,8 @@ const pr: Pr = {
   html_url: "u",
   head_ref: "feat",
   head_repo: "o/r",
+  author: "me",
+  people: { contributors: ["me"], commenters: [], reviewers: [] },
   files: [],
 };
 const f = (file: string, line: number, severity: Finding["severity"], title: string): Finding => ({

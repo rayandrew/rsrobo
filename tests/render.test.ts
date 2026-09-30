@@ -17,6 +17,8 @@ const pr: Pr = {
   html_url: "https://github.com/o/r/pull/7",
   head_ref: "feat",
   head_repo: "o/r",
+  author: "me",
+  people: { contributors: ["me"], commenters: [], reviewers: [] },
   files: [],
 };
 const result: Result = {
@@ -81,11 +83,25 @@ test("saveReview writes one md and one json per run in the PR folder", () => {
   const dir = mkdtempSync(join(tmpdir(), "rsrobo-"));
   const a = saveReview(dir, pr, result, "P3", new Date("2026-09-30T10:00:00Z"));
   saveReview(dir, pr, result, "P3", new Date("2026-09-30T11:00:00Z"));
-  assert.match(readFileSync(a, "utf8"), /^https:\/\/github.com\/o\/r\/pull\/7 at a{40}\n\n> \[!CAUTION\]/);
+  assert.match(
+    readFileSync(a, "utf8"),
+    /^https:\/\/github.com\/o\/r\/pull\/7 at a{40}\n\n- author: @me\n- commits: @me\n\n> \[!CAUTION\]/,
+  );
   assert.deepEqual(readdirSync(join(dir, "reviews", "o", "r", "7")).sort(), [
     "2026-09-30-10-00-aaaaaaa.json",
     "2026-09-30-10-00-aaaaaaa.md",
     "2026-09-30-11-00-aaaaaaa.json",
     "2026-09-30-11-00-aaaaaaa.md",
   ]);
+});
+
+test("saveReview records author, people and requester", () => {
+  const dir = mkdtempSync(join(tmpdir(), "rsrobo-"));
+  const withPeople = { ...pr, people: { contributors: ["me", "pal"], commenters: ["bob"], reviewers: [] } };
+  const f = saveReview(dir, withPeople, { ...result, requester: "me" }, "P3", new Date("2026-09-30T10:00:00Z"));
+  assert.match(
+    readFileSync(f, "utf8"),
+    /^https:[^\n]+\n\n- author: @me\n- commits: @me, @pal\n- comments: @bob\n- run asked by: @me\n\n/,
+  );
+  assert.equal(JSON.parse(readFileSync(f.replace(/\.md$/, ".json"), "utf8")).people.commenters[0], "bob");
 });

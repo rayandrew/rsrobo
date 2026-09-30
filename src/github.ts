@@ -13,8 +13,13 @@ export type Pr = {
   html_url: string;
   head_ref: string;
   head_repo: string;
+  author: string;
+  people: People;
   files: PrFile[];
 };
+
+// Who is involved: commit authors, comment and review authors. Logins, deduplicated, without bots.
+export type People = { contributors: string[]; commenters: string[]; reviewers: string[] };
 
 export type PrFile = { filename: string; status: string; changes: number };
 
@@ -36,7 +41,33 @@ export function fetchPr(owner: string, repo: string, number: number): Pr {
     html_url: p.html_url,
     head_ref: p.head.ref,
     head_repo: p.head.repo.full_name,
+    author: p.user.login,
+    people: people(owner, repo, number),
     files,
+  };
+}
+
+function people(owner: string, repo: string, number: number): People {
+  const logins = (path: string, pick: (x: Record<string, { login?: string } | null>) => string | undefined) =>
+    [
+      ...new Set(
+        (JSON.parse(gh(["--paginate", "--slurp", path])).flat() as Record<string, { login?: string } | null>[]).map(
+          pick,
+        ),
+      ),
+    ]
+      .filter((l): l is string => !!l && !l.endsWith("[bot]"))
+      .sort();
+  const base = `repos/${owner}/${repo}`;
+  return {
+    contributors: logins(`${base}/pulls/${number}/commits?per_page=100`, (c) => c.author?.login),
+    commenters: [
+      ...new Set([
+        ...logins(`${base}/issues/${number}/comments?per_page=100`, (c) => c.user?.login),
+        ...logins(`${base}/pulls/${number}/comments?per_page=100`, (c) => c.user?.login),
+      ]),
+    ].sort(),
+    reviewers: logins(`${base}/pulls/${number}/reviews?per_page=100`, (r) => r.user?.login),
   };
 }
 

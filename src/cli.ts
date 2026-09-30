@@ -55,6 +55,7 @@ const { values, positionals } = parseArgs({
     models: { type: "string" },
     via: { type: "string", default: "patch" },
     force: { type: "boolean", default: false },
+    requester: { type: "string" },
     work: { type: "string", default: process.env.RSROBO_WORK_DIR ?? join(root, ".work") },
   },
 });
@@ -265,6 +266,7 @@ const result =
         verifyPi: verifyEngine.engine === "pi" ? verifyEngine : engine,
       })
     : runReview(dir, pr, { ...common, model: engine.model, verifyModel: alias(values.verify ?? modelAlias) });
+if (values.requester) result.requester = values.requester;
 writeFileSync(join(dir, ".rsrobo", "review.json"), JSON.stringify(result, null, 2));
 const minSeverity = values["min-severity"] as Severity;
 
