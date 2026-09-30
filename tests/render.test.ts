@@ -47,6 +47,7 @@ const result: Result = {
       evidence: ["`y.py:10` does a", "`y.py:12` does b"],
       fix: "swap them",
       suggested_patch: "--- a\n+++ b\n",
+      n: 2,
     },
   ],
   model: "claude-sonnet-5-5",
@@ -119,4 +120,46 @@ test("fullPaths resolves a bare file name to its unique tracked path", async () 
     fullPaths(dir, "see `x.cpp:3-4` and `y.cpp:1` and `z.cpp:9`"),
     "see `a/b/x.cpp:3-4` and `y.cpp:1` and `z.cpp:9`",
   );
+});
+
+test("reconcile keeps numbers for findings at the same place and lists the resolved ones", async () => {
+  const { reconcile } = await import("../src/review.ts");
+  const prev = {
+    head: "b".repeat(40),
+    findings: [
+      { ...result.findings[1], n: 1 },
+      { ...result.findings[0], n: 2 },
+      {
+        file: "gone.py",
+        line_start: 1,
+        line_end: 2,
+        severity: "P1" as const,
+        title: "gone",
+        problem: "",
+        evidence: [],
+        fix: "",
+        n: 3,
+      },
+    ],
+  };
+  const fresh: Result = {
+    ...result,
+    findings: [
+      { ...result.findings[1], line_start: 12, line_end: 14, title: "wrong, moved" },
+      { file: "new.py", line_start: 5, line_end: 5, severity: "P2", title: "new", problem: "", evidence: [], fix: "" },
+    ],
+  };
+  const r = reconcile(prev, fresh);
+  assert.deepEqual(
+    r.findings.map((f) => [f.n, f.title]),
+    [
+      [1, "wrong, moved"],
+      [4, "new"],
+    ],
+  );
+  assert.deepEqual(
+    r.resolved?.map((f) => f.n),
+    [2, 3],
+  );
+  assert.match(render(pr, r), /Resolved since the last review: #2 minor; #3 gone\./);
 });

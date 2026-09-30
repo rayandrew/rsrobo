@@ -39,6 +39,7 @@ npm run deploy
 
 Command grammar:
 
+- A second `review` on the same PR is a re-review: earlier findings keep their numbers, the diff since the last reviewed commit is reviewed in full, and findings the code now handles are listed as resolved.
 - `@rsrobo review [model=alias] [effort=low|medium|high] [budget=usd] [post=pending|review|inbox|comment] [focus=a,b] [free text]`
 - `@rsrobo fix 2,3|all [via=patch|suggest|stacked|push] [platform=linux|macos] [model=alias]` applies findings from the latest saved review. `patch` posts the diff to the inbox issue; `suggest` also opens a pending review with suggestion blocks for hunks inside the PR diff; `stacked` pushes a branch and opens a PR against the PR branch; `push` commits onto the PR branch. `stacked` and `push` first run the repo's `test:` command from its notes, on a macOS runner with `platform=macos`, and stop on failure. `config.json` says which levels each repo allows.
 - Unlisted repos get every fix level, every provider and public plus internal kb lessons; the `repos` entries in `config.json` restrict the LLNL orgs.

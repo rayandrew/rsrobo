@@ -24,9 +24,10 @@ export function loadFindings(pr: Pr, notesDir: string | undefined, workDir: stri
 
 export function pick(r: Result, spec: string): Finding[] {
   if (spec === "all") return r.findings;
+  const known = r.findings.map((f) => f.n).join(", ");
   return spec
     .split(",")
-    .map((n) => r.findings[Number(n) - 1] ?? fail(`no finding ${n}; the review has ${r.findings.length}`));
+    .map((n) => r.findings.find((f) => f.n === Number(n)) ?? fail(`no finding #${n}; known: ${known}`));
 }
 
 // Lets the model edit the checkout for one finding and returns the resulting diff against the PR head.

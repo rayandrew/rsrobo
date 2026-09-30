@@ -15,11 +15,19 @@ export type Finding = {
   evidence: string[];
   fix: string;
   suggested_patch?: string;
+  n?: number;
 };
 
 export type Change = { area: string; change: string };
 
-export type Review = { map: string; changes: Change[]; findings: Finding[]; skipped: string[]; lessons: string[] };
+export type Review = {
+  map: string;
+  changes: Change[];
+  findings: Finding[];
+  skipped: string[];
+  lessons: string[];
+  resolved?: Finding[];
+};
 
 export type Result = Review & {
   model: string;
@@ -79,6 +87,8 @@ const kbArgs = [
   ...KB_TOOLS,
 ];
 
+export type Previous = { head: string; findings: Finding[] };
+
 export type Options = {
   model: string;
   verifyModel: string;
@@ -89,6 +99,7 @@ export type Options = {
   skillsDir?: string;
   kbDir?: string;
   promptsDir: string;
+  previous?: Previous;
 };
 
 // The PR head must not configure the reviewer (prompt injection), so its own
@@ -111,10 +122,38 @@ export function buildPrompt(pr: Pr, o: Options): string {
     `<body>\n${pr.body}\n</body>`,
     `<changed_files count="${pr.files.length}">\n${files}\n</changed_files>`,
     `</pr>`,
+    o.previous && previousBlock(o.previous, pr.head),
     `The full diff is in \`.rsrobo/diff.patch\`. Failed CI checks, when any, are in \`.rsrobo/ci.md\`; a failure the PR causes is a finding. Related issues and PRs are in \`.rsrobo/related.md\`; a change that duplicates or conflicts with them, or an issue the PR says it fixes but does not, is a finding.`,
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+// Earlier findings for a re-review: the model re-checks each one and reviews the new diff in full.
+function previousBlock(prev: Previous, head: string): string {
+  const lines = prev.findings.map(
+    (f) => `- #${f.n} ${f.severity} \`${f.file}:${f.line_start}-${f.line_end}\` ${f.title}. ${f.problem}`,
+  );
+  const since = prev.head === head ? "" : ` The diff since then is in \`.rsrobo/since-last.patch\`; review it in full.`;
+  return `<previous_review head="${prev.head}">\n${lines.join("\n")}\n</previous_review>\nRe-check each previous finding against the current code. Report it again when it is still open, at its current lines. Leave it out when the code now handles it.${since}`;
+}
+
+// Stable numbers across re-reviews: a finding at the same place keeps its number, a new one gets the next.
+// Previous findings that no longer appear are the resolved ones.
+export function reconcile(prev: Previous | undefined, r: Result): Result {
+  const same = (a: Finding, b: Finding) =>
+    a.file === b.file && a.line_start <= b.line_end + 5 && b.line_start <= a.line_end + 5;
+  let next = Math.max(0, ...(prev?.findings.map((f) => f.n ?? 0) ?? []));
+  const matched = new Set<number>();
+  for (const f of r.findings) {
+    const old = prev?.findings.find((p) => p.n !== undefined && !matched.has(p.n) && same(p, f));
+    if (old?.n !== undefined) {
+      f.n = old.n;
+      matched.add(old.n);
+    } else f.n = ++next;
+  }
+  r.resolved = prev?.findings.filter((p) => p.n !== undefined && !matched.has(p.n)) ?? [];
+  return r;
 }
 
 export function runReview(dir: string, pr: Pr, o: Options): Result {
@@ -196,11 +235,14 @@ export function overview(pr: Pr, r: Result, shown: Finding[]): string {
   if (n) {
     out.push(
       table(
-        ["Sev", "Where", "Finding"],
-        shown.map((f) => [f.severity, where(pr, f), f.title]),
+        ["#", "Sev", "Where", "Finding"],
+        shown.map((f) => [String(f.n ?? ""), f.severity, where(pr, f), f.title]),
       ),
     );
     out.push(LEGEND);
+  }
+  if (r.resolved?.length) {
+    out.push(`Resolved since the last review: ${r.resolved.map((f) => `#${f.n} ${f.title}`).join("; ")}.`);
   }
   const walk = [linkify(pr, r.map)];
   if (r.changes.length)
@@ -236,7 +278,7 @@ export function findingMd(pr: Pr, f: Finding, withWhere = true, n?: number): str
 
 export function render(pr: Pr, r: Result, minSeverity: Severity = "P3"): string {
   const shown = shownFindings(r, minSeverity);
-  return [overview(pr, r, shown), ...shown.map((f, i) => findingMd(pr, f, true, i + 1))].join("\n\n---\n\n");
+  return [overview(pr, r, shown), ...shown.map((f) => findingMd(pr, f, true, f.n))].join("\n\n---\n\n");
 }
 
 const agentText = (pr: Pr, f: Finding) =>

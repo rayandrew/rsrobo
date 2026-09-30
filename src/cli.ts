@@ -32,7 +32,16 @@ import {
   postSuggestions,
 } from "./post.ts";
 import { relatedReport } from "./related.ts";
-import { initNotes, prepare, render, runReview, type Severity, saveReview } from "./review.ts";
+import {
+  initNotes,
+  type Previous,
+  prepare,
+  reconcile,
+  render,
+  runReview,
+  type Severity,
+  saveReview,
+} from "./review.ts";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const config = JSON.parse(readFileSync(join(root, "config.json"), "utf8"));
@@ -250,7 +259,7 @@ if (task === "fix") {
         extra += `\n\n\`\`\`text\n${gate.output.trim().split("\n").slice(-40).join("\n")}\n\`\`\``;
       } else if (values.post) {
         const token = process.env.GH_TOKEN ?? execFileSync("gh", ["auth", "token"], { encoding: "utf8" }).trim();
-        const n = saved.findings.indexOf(f) + 1;
+        const n = f.n ?? 0;
         extra += ` Delivered: ${deliverCommit(dir, pr, f, n, patch, via, token, config.commit_trailer)}`;
         execFileSync("git", ["-C", dir, "checkout", "-q", pr.head]);
       }
@@ -310,7 +319,29 @@ for (const e of [engine, verifyEngine]) {
   if (!allowed.includes(provider))
     fail(`provider ${provider} is not allowed on ${owner}/${repo}; allowed: ${allowed.join(", ")}`);
 }
+// A re-review: load the last saved review of this PR, and write the diff since its head when there is one.
+let previous: Previous | undefined;
+try {
+  const last = loadFindings(pr, values.save || undefined, dir);
+  if (last.findings.every((f) => f.n === undefined)) {
+    for (const [i, f] of last.findings.entries()) f.n = i + 1;
+  }
+  previous = { head: (last as { head?: string }).head ?? pr.head, findings: last.findings };
+  if (previous.head !== pr.head) {
+    execFileSync("git", ["-C", dir, "fetch", "-q", "origin", previous.head]);
+    writeFileSync(
+      join(dir, ".rsrobo", "since-last.patch"),
+      execFileSync("git", ["-C", dir, "diff", `${previous.head}..${pr.head}`], {
+        encoding: "utf8",
+        maxBuffer: 256 << 20,
+      }),
+    );
+  }
+} catch {
+  previous = undefined;
+}
 const common = {
+  previous,
   budgetUsd: Math.min(Number(values.budget), config.max_budget_usd),
   effort: values.effort ?? "high",
   focus: values.focus,
@@ -328,6 +359,7 @@ const result =
         verifyPi: verifyEngine.engine === "pi" ? verifyEngine : engine,
       })
     : runReview(dir, pr, { ...common, model: engine.model, verifyModel: alias(values.verify ?? modelAlias) });
+reconcile(previous, result);
 if (values.requester) result.requester = values.requester;
 writeFileSync(join(dir, ".rsrobo", "review.json"), JSON.stringify(result, null, 2));
 const minSeverity = values["min-severity"] as Severity;

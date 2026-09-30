@@ -46,9 +46,9 @@ export function postReview(
     line: f.line_end,
     side: "RIGHT",
     ...(f.line_end > f.line_start ? { start_line: f.line_start, start_side: "RIGHT" } : {}),
-    body: findingMd(pr, f, false, shown.indexOf(f) + 1),
+    body: findingMd(pr, f, false, f.n),
   }));
-  const parts = [overview(pr, r, shown), ...rest.map((f) => findingMd(pr, f, true, shown.indexOf(f) + 1))];
+  const parts = [overview(pr, r, shown), ...rest.map((f) => findingMd(pr, f, true, f.n))];
   if (mode === "review") parts.push(AI_NOTE);
   const body = parts.join("\n\n---\n\n");
   const req = { commit_id: pr.head, body, comments, ...(mode === "review" ? { event: "COMMENT" } : {}) };
