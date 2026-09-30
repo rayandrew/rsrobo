@@ -1,0 +1,24 @@
+{
+  "name": "rsrobo",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "rsrobo": "src/cli.ts"
+  },
+  "scripts": {
+    "rsrobo": "node src/cli.ts",
+    "test": "node --test tests/*.test.ts",
+    "lint": "biome check",
+    "fix": "biome check --write",
+    "typecheck": "tsc",
+    "check": "biome check && tsc && node --test tests/*.test.ts"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.15",
+    "@types/node": "^26.6.3",
+    "typescript": "^7.0.2"
+  }
+}
