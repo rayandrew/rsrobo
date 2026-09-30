@@ -10,6 +10,7 @@ export type Pr = {
   body: string;
   base: string;
   head: string;
+  html_url: string;
   files: PrFile[];
 };
 
@@ -22,7 +23,17 @@ export function fetchPr(owner: string, repo: string, number: number): Pr {
   const files = JSON.parse(
     gh(["--paginate", "--slurp", `repos/${owner}/${repo}/pulls/${number}/files?per_page=100`]),
   ).flat();
-  return { owner, repo, number, title: p.title, body: p.body ?? "", base: p.base.sha, head: p.head.sha, files };
+  return {
+    owner,
+    repo,
+    number,
+    title: p.title,
+    body: p.body ?? "",
+    base: p.base.sha,
+    head: p.head.sha,
+    html_url: p.html_url,
+    files,
+  };
 }
 
 // Clones once per PR under workRoot, checks out the head, writes the diff to .rsrobo/diff.patch.

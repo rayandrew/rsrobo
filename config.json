@@ -1,5 +1,6 @@
 {
-  "bot_login": "FILL-IN",
+  "bot_login": "rsrobo",
+  "inbox_repo": "rayandrew/rsrobo-notes",
   "allowed_commenters": ["rayandrew"],
   "allowed_repos": ["rayandrew/*", "llnl-asr/*"],
   "default_post": "pending",

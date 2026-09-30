@@ -11,6 +11,7 @@ const pr: Pr = {
   body: "",
   base: "b".repeat(40),
   head: "a".repeat(40),
+  html_url: "https://github.com/o/r/pull/7",
   files: [],
 };
 const result: Result = {
