@@ -134,3 +134,14 @@ test("summarize and triage dispatch as their own tasks", async () => {
   await poll(env);
   assert.deepEqual(dispatches(calls), [{ repo: "o/r", pr: "7", task: "triage", requester: "me" }]);
 });
+
+test("assess start is a pending review; assess finish and publish dispatch publish", async () => {
+  seen.clear();
+  let calls = fakeGitHub([{ id: 10, body: "@rsrobo assess start effort=medium", user: { login: "me" }, html_url: "" }]);
+  await poll(env);
+  assert.deepEqual(dispatches(calls), [{ repo: "o/r", pr: "7", post: "pending", requester: "me", effort: "medium" }]);
+  seen.clear();
+  calls = fakeGitHub([{ id: 11, body: "@rsrobo assess finish", user: { login: "me" }, html_url: "" }]);
+  await poll(env);
+  assert.deepEqual(dispatches(calls), [{ repo: "o/r", pr: "7", task: "publish", requester: "me" }]);
+});

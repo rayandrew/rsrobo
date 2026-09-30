@@ -172,6 +172,32 @@ async function run(env: Env, n: Notification, c: Comment, spec: NonNullable<Retu
     await dispatch(env, inputs);
     return;
   }
+  // `assess start` is a review that stays a private draft under my name; `assess finish` publishes that draft as the bot.
+  if (spec.task === "assess") {
+    const phase = spec.text.split(/\s+/)[0] || "start";
+    if (phase === "finish") {
+      await dispatch(env, { repo, pr: String(pr), task: "publish", requester: c.user.login });
+      return;
+    }
+    if (phase !== "start") {
+      await inbox(
+        env,
+        `rsrobo: bad assess command on ${repo}#${pr}`,
+        `${c.html_url}\n\nUse \`assess start\` or \`assess finish\`.`,
+      );
+      return;
+    }
+    const inputs: Record<string, string> = { repo, pr: String(pr), post: "pending", requester: c.user.login };
+    for (const k of ["model", "budget", "focus", "effort"]) if (spec.args[k]) inputs[k] = spec.args[k];
+    const rest = spec.text.split(/\s+/).slice(1).join(" ");
+    if (rest) inputs.focus = [inputs.focus, rest].filter(Boolean).join("; ");
+    await dispatch(env, inputs);
+    return;
+  }
+  if (spec.task === "publish") {
+    await dispatch(env, { repo, pr: String(pr), task: "publish", requester: c.user.login });
+    return;
+  }
   if (spec.task === "summarize" || spec.task === "triage") {
     const inputs: Record<string, string> = { repo, pr: String(pr), task: spec.task, requester: c.user.login };
     if (spec.args.model) inputs.model = spec.args.model;

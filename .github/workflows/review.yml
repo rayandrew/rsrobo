@@ -4,14 +4,14 @@ on:
     inputs:
       repo: { description: "owner/name", required: true }
       pr: { description: "PR number", required: true }
-      post: { description: "pending | review | inbox | comment", default: "pending" }
+      post: { description: "pending | review | inbox | comment", default: "review" }
       model: { description: "model alias", default: "sonnet" }
       budget: { description: "USD cap", default: "3" }
       focus: { description: "focus areas", default: "" }
       effort: { description: "low | medium | high", default: "high" }
       requester: { description: "who asked for the run", default: "" }
       question: { description: "ask only: the question", default: "" }
-      task: { description: "review | fix | init-notes | ask | summarize | triage", default: "review" }
+      task: { description: "review | publish | fix | init-notes | ask | summarize | triage", default: "review" }
       findings: { description: "fix only: 2,3 or all", default: "" }
       via: { description: "fix only: patch | suggest | stacked | push", default: "patch" }
       platform: { description: "linux | macos, for the fix test gate", default: "linux" }
@@ -71,6 +71,8 @@ jobs:
             node src/cli.ts "$TASK" "$REPO" --issue "$PR" --post --budget "$BUDGET" ${REQUESTER:+--requester "$REQUESTER"} ${MODEL:+--model "$MODEL"}
           elif [ "$TASK" = init-notes ]; then
             node src/cli.ts init-notes "$REPO" --notes "$RSROBO_NOTES_DIR" --model "$MODEL" --budget "$BUDGET"
+          elif [ "$TASK" = publish ]; then
+            node src/cli.ts publish "$REPO#$PR"
           elif [ "$TASK" = fix ]; then
             node src/cli.ts fix "$REPO#$PR" "$FINDINGS" --via "$VIA" --model "$MODEL" --budget "$BUDGET" --post inbox
           else

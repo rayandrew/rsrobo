@@ -3,7 +3,7 @@
   "inbox_repo": "rayandrew/rsrobo-notes",
   "allowed_commenters": ["rayandrew"],
   "allowed_repos": ["*/*"],
-  "default_post": "pending",
+  "default_post": "review",
   "default_budget_usd": 3,
   "max_budget_usd": 10,
   "min_severity": "P3",
@@ -24,31 +24,31 @@
   "commit_trailer": "Assisted-by: rsrobo",
   "repos": {
     "llnl-asr/*": {
-      "post": "pending",
+      "post": "review",
       "kb": ["public"],
       "fix": ["patch", "suggest"],
       "providers": ["claude", "openai-codex", "openrouter"]
     },
     "llnl/*": {
-      "post": "pending",
+      "post": "review",
       "kb": ["public"],
       "fix": ["patch", "suggest"],
       "providers": ["claude", "openai-codex", "openrouter"]
     },
     "dftracer/*": {
-      "post": "pending",
+      "post": "review",
       "kb": ["public"],
       "fix": ["patch", "suggest"],
       "providers": ["claude", "openai-codex", "openrouter"]
     },
     "rayandrew/*": {
-      "post": "pending",
+      "post": "review",
       "kb": ["public", "internal"],
       "fix": ["patch", "suggest", "stacked", "push"],
       "providers": ["claude", "openai-codex", "openrouter", "freeinference"]
     },
     "rslib/*": {
-      "post": "pending",
+      "post": "review",
       "kb": ["public", "internal"],
       "fix": ["patch", "suggest", "stacked", "push"],
       "providers": ["claude", "openai-codex", "openrouter", "freeinference"]

@@ -54,6 +54,7 @@ const usage = [
   "usage: rsrobo review owner/repo#N [--model alias] [--verify alias] [--budget usd] [--effort high] [--focus a,b] [--min-severity P2] [--notes dir] [--skills dir] [--post pending|review|inbox|comment] [--save dir] [--kb dir] [--json]",
   "       rsrobo compare owner/repo#N --models a,b [--effort high] [--budget usd] [--kb dir]",
   "       rsrobo fix owner/repo#N 2,3|all [--via patch|suggest|stacked|push] [--model alias] [--post]",
+  "       rsrobo publish owner/repo#N [--save notes]",
   "       rsrobo init-notes owner/repo [--notes dir] [--force]",
   '       rsrobo ask owner/repo "question" [--issue N --post] [--model alias] [--kb dir]',
   "       rsrobo summarize|triage owner/repo --issue N [--post] [--model alias]",
@@ -313,7 +314,9 @@ if (task === "ledger") {
 }
 
 const m =
-  ["review", "compare", "fix"].includes(task ?? "") && target ? /^([\w.-]+)\/([\w.-]+)#(\d+)$/.exec(target) : null;
+  ["review", "compare", "fix", "publish"].includes(task ?? "") && target
+    ? /^([\w.-]+)\/([\w.-]+)#(\d+)$/.exec(target)
+    : null;
 if (!m) fail(usage);
 const [, owner, repo, number] = m;
 
@@ -335,6 +338,27 @@ const pr = fetchPr(owner, repo, Number(number));
 const repoConfig = repoPolicy(owner, repo);
 
 // fix: apply chosen findings from the latest saved review, deliver as a patch or as suggestion blocks.
+// publish: post the last saved review as a public bot review, and delete my pending draft of it. No model runs.
+if (task === "publish") {
+  const dir = checkout(pr, values.work);
+  const saved = loadFindings(pr, values.save || undefined, dir);
+  const patch = readFileSync(join(dir, ".rsrobo", "diff.patch"), "utf8");
+  const url = postReview(pr, saved, patch, botToken(), "review", values["min-severity"] as Severity);
+  const userToken = process.env.GH_TOKEN ?? execFileSync("gh", ["auth", "token"], { encoding: "utf8" }).trim();
+  const base = `repos/${pr.owner}/${pr.repo}/pulls/${pr.number}/reviews`;
+  const mine = JSON.parse(
+    execFileSync("gh", ["api", base], { encoding: "utf8", env: { ...process.env, GH_TOKEN: userToken } }),
+  ) as {
+    id: number;
+    state: string;
+  }[];
+  for (const v of mine.filter((v) => v.state === "PENDING")) {
+    execFileSync("gh", ["api", "-X", "DELETE", `${base}/${v.id}`], { env: { ...process.env, GH_TOKEN: userToken } });
+  }
+  console.log(url);
+  process.exit(0);
+}
+
 if (task === "fix") {
   const spec = positionals[2] ?? fail(usage);
   const via = values.via as Via;

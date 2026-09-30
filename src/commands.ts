@@ -28,6 +28,8 @@ const TASKS = new Set([
   "init-notes",
   "ask",
   "approve",
+  "assess",
+  "publish",
 ]);
 const TOKEN = /^[A-Za-z0-9_.,*~/\-$]+$/;
 
