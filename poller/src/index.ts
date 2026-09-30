@@ -33,7 +33,8 @@ export default {
 export async function poll(env: Env) {
   const notes = (await gh(env.BOT_TOKEN, "/notifications?participating=true")) as Notification[];
   for (const n of notes) {
-    if (n.subject.type !== "PullRequest") continue;
+    // Issues take only `ask`; the rest needs a pull request. handle() sorts that out.
+    if (n.subject.type !== "PullRequest" && n.subject.type !== "Issue") continue;
     if (n.reason === "mention") {
       const comment = await findMention(env, n);
       if (comment && !(await env.SEEN.get(`comment:${comment.id}`))) {
@@ -165,6 +166,26 @@ async function run(env: Env, n: Notification, c: Comment, spec: NonNullable<Retu
     const inputs: Record<string, string> = { repo, pr: String(pr), task: "fix", findings: spec.text };
     for (const k of ["model", "budget", "via", "platform"]) if (spec.args[k]) inputs[k] = spec.args[k];
     await dispatch(env, inputs);
+    return;
+  }
+  if (spec.task === "ask") {
+    if (!spec.text) {
+      await inbox(env, `rsrobo: empty question on ${repo}#${pr}`, `${c.html_url}\n\nWrite the question after \`ask\`.`);
+      return;
+    }
+    const inputs: Record<string, string> = {
+      repo,
+      pr: String(pr),
+      task: "ask",
+      question: spec.text,
+      requester: c.user.login,
+    };
+    if (spec.args.model) inputs.model = spec.args.model;
+    await dispatch(env, inputs);
+    return;
+  }
+  if (n.subject.type === "Issue") {
+    await inbox(env, `rsrobo: ${spec.task} needs a pull request`, `${c.html_url}\n\nOn an issue only \`ask\` works.`);
     return;
   }
   if (spec.task === "init-notes") {

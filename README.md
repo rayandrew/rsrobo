@@ -42,11 +42,12 @@ Command grammar:
 - `@rsrobo review [model=alias] [effort=low|medium|high] [budget=usd] [post=pending|review|inbox|comment] [focus=a,b] [free text]`
 - `@rsrobo fix 2,3|all [via=patch|suggest|stacked|push] [platform=linux|macos] [model=alias]` applies findings from the latest saved review. `patch` posts the diff to the inbox issue; `suggest` also opens a pending review with suggestion blocks for hunks inside the PR diff; `stacked` pushes a branch and opens a PR against the PR branch; `push` commits onto the PR branch. `stacked` and `push` first run the repo's `test:` command from its notes, on a macOS runner with `platform=macos`, and stop on failure. `config.json` says which levels each repo allows.
 - Unlisted repos get every fix level, every provider and public plus internal kb lessons; the `repos` entries in `config.json` restrict the LLNL orgs.
+- `@rsrobo ask <question>` on an issue or a PR answers from the default branch and the kb, with linked code references and a sources line. On an issue the question may refer to it: `ask have we implemented this?`, `ask search duplicates`. The model sees the issue, keyword-matched open items with a body excerpt, and every open title. Haiku by default, a few cents. The answer is posted by the bot in the thread and copied to the inbox. A stranger's ask waits for your `approve` like every other command.
 - `@rsrobo init-notes` drafts `<owner>/<repo>/CLAUDE.md` in the notes repo from the default branch. It never overwrites an existing file.
 - Requesting a review from the bot on the PR page starts a default review. Own repos only; the bot must be a collaborator.
 - Only `rayandrew` can start a run. When someone else mentions the bot, it replies once that only the owner can start it, and the request lands in the inbox with the command to copy. `@rsrobo approve [model=... effort=... budget=...]` on the same PR runs their most recent request; your keys replace theirs, so you can cap the model and effort.
 
-Failed CI checks on the PR head are fetched read-only and handed to the reviewer as `.rsrobo/ci.md`.
+Failed CI checks on the PR head are fetched read-only and handed to the reviewer as `.rsrobo/ci.md`. Related work goes to `.rsrobo/related.md`: issues the PR references, open PRs on the same files, earlier PRs on the same files from the git log, and open issues that name the changed files. No model is involved in either.
 
 ## Engines
 

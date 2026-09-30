@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -104,4 +104,19 @@ test("saveReview records author, people and requester", () => {
     /^https:[^\n]+\n\n- author: @me\n- commits: @me, @pal\n- comments: @bob\n- run asked by: @me\n\n/,
   );
   assert.equal(JSON.parse(readFileSync(f.replace(/\.md$/, ".json"), "utf8")).people.commenters[0], "bob");
+});
+
+test("fullPaths resolves a bare file name to its unique tracked path", async () => {
+  const { fullPaths } = await import("../src/ask.ts");
+  const { execFileSync } = await import("node:child_process");
+  const dir = mkdtempSync(join(tmpdir(), "rsrobo-git-"));
+  execFileSync("git", ["-C", dir, "init", "-q"]);
+  mkdirSync(join(dir, "a", "b"), { recursive: true });
+  writeFileSync(join(dir, "a", "b", "x.cpp"), "");
+  writeFileSync(join(dir, "y.cpp"), "");
+  execFileSync("git", ["-C", dir, "add", "-A"]);
+  assert.equal(
+    fullPaths(dir, "see `x.cpp:3-4` and `y.cpp:1` and `z.cpp:9`"),
+    "see `a/b/x.cpp:3-4` and `y.cpp:1` and `z.cpp:9`",
+  );
 });

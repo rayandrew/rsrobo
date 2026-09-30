@@ -111,7 +111,7 @@ export function buildPrompt(pr: Pr, o: Options): string {
     `<body>\n${pr.body}\n</body>`,
     `<changed_files count="${pr.files.length}">\n${files}\n</changed_files>`,
     `</pr>`,
-    `The full diff is in \`.rsrobo/diff.patch\`. Failed CI checks, when any, are in \`.rsrobo/ci.md\`; a failure the PR causes is a finding.`,
+    `The full diff is in \`.rsrobo/diff.patch\`. Failed CI checks, when any, are in \`.rsrobo/ci.md\`; a failure the PR causes is a finding. Related issues and PRs are in \`.rsrobo/related.md\`; a change that duplicates or conflicts with them, or an issue the PR says it fixes but does not, is a finding.`,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -131,6 +131,7 @@ export function runReview(dir: string, pr: Pr, o: Options): Result {
     "claude",
     [
       "-p",
+      buildPrompt(pr, o),
       "--output-format",
       "json",
       "--no-session-persistence",

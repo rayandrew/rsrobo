@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { askRepo } from "./ask.ts";
 import { ciReport } from "./ci.ts";
 import { compareMd } from "./compare.ts";
 import { runReviewPi } from "./engine-pi.ts";
@@ -30,12 +31,13 @@ import {
   postReview,
   postSuggestions,
 } from "./post.ts";
+import { relatedReport } from "./related.ts";
 import { initNotes, prepare, render, runReview, type Severity, saveReview } from "./review.ts";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const config = JSON.parse(readFileSync(join(root, "config.json"), "utf8"));
 const usage =
-  "usage: rsrobo review owner/repo#N [--model alias] [--verify alias] [--budget usd] [--effort high] [--focus a,b] [--min-severity P2] [--notes dir] [--skills dir] [--post pending|review|inbox|comment] [--save dir] [--kb dir] [--json]\n       rsrobo compare owner/repo#N --models a,b [--effort high] [--budget usd] [--kb dir]\n       rsrobo fix owner/repo#N 2,3|all [--via patch|suggest|stacked|push] [--model alias] [--post]\n       rsrobo init-notes owner/repo [--notes dir] [--force]\n       rsrobo models";
+  'usage: rsrobo review owner/repo#N [--model alias] [--verify alias] [--budget usd] [--effort high] [--focus a,b] [--min-severity P2] [--notes dir] [--skills dir] [--post pending|review|inbox|comment] [--save dir] [--kb dir] [--json]\n       rsrobo compare owner/repo#N --models a,b [--effort high] [--budget usd] [--kb dir]\n       rsrobo fix owner/repo#N 2,3|all [--via patch|suggest|stacked|push] [--model alias] [--post]\n       rsrobo init-notes owner/repo [--notes dir] [--force]\n       rsrobo ask owner/repo "question" [--issue N --post] [--model alias] [--kb dir]\n       rsrobo models';
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -56,6 +58,7 @@ const { values, positionals } = parseArgs({
     via: { type: "string", default: "patch" },
     force: { type: "boolean", default: false },
     requester: { type: "string" },
+    issue: { type: "string" },
     work: { type: "string", default: process.env.RSROBO_WORK_DIR ?? join(root, ".work") },
   },
 });
@@ -90,6 +93,11 @@ const resolve = (name: string): Engine => {
     `unknown model "${name}"; aliases: ${Object.keys(config.models).join(", ")}; or provider/model with provider in ${config.pi_providers.join(", ")}`,
   );
 };
+type Policy = { kb?: Sensitivity[]; fix?: Via[]; providers?: string[] };
+const repoPolicy = (owner: string, repo: string): Policy | undefined =>
+  Object.entries(config.repos as Record<string, Policy>).find(([g]) =>
+    new RegExp(`^${g.replace(/\*/g, "[^/]*")}$`).test(`${owner}/${repo}`),
+  )?.[1];
 const alias = (name: string): string => {
   const e = resolve(name);
   if (e.engine !== "claude") fail(`alias "${name}" runs on pi; this task needs a Claude alias`);
@@ -97,6 +105,57 @@ const alias = (name: string): string => {
 };
 
 // init-notes: draft <notes>/<owner>/<repo>/CLAUDE.md from the default branch. Never overwrites without --force.
+// ask: answer a question about the default branch; --issue N posts the answer there as the bot and copies it to the inbox.
+if (task === "ask") {
+  const rm = target ? /^([\w.-]+)\/([\w.-]+)$/.exec(target) : null;
+  const question = positionals[2];
+  if (!rm || !question) fail(usage);
+  const [, owner, repo] = rm;
+  const dir = cloneDefault(owner, repo, values.work);
+  prepare(dir, { owner, repo } as Parameters<typeof prepare>[1], values.notes);
+  if (values.kb) pruneKb(values.kb, repoPolicy(owner, repo)?.kb ?? ["public", "internal"]);
+  const { md, cost_usd, seconds } = askRepo(dir, owner, repo, question, {
+    issue: values.issue ? Number(values.issue) : undefined,
+    model: alias(values.model === config.default_model ? config.ask_model : (values.model ?? config.ask_model)),
+    budgetUsd: Math.min(Number(values.budget), config.max_budget_usd),
+    effort: values.effort ?? "medium",
+    promptsDir: join(root, "prompts"),
+    kbDir: values.kb,
+  });
+  const body = `${md}\n\n<sub>rsrobo, ${config.ask_model}, $${cost_usd.toFixed(2)}, ${seconds}s. Asked by @${values.requester ?? "me"}: ${question}</sub>`;
+  if (values.issue && values.post) {
+    const userToken = process.env.GH_TOKEN ?? execFileSync("gh", ["auth", "token"], { encoding: "utf8" }).trim();
+    const url = `repos/${owner}/${repo}/issues/${values.issue}/comments`;
+    const res = JSON.parse(
+      execFileSync("gh", ["api", "-X", "POST", url, "-f", `body=${body}`], {
+        encoding: "utf8",
+        env: { ...process.env, GH_TOKEN: botToken() },
+      }),
+    ) as { html_url: string };
+    execFileSync(
+      "gh",
+      [
+        "api",
+        "-X",
+        "POST",
+        `repos/${config.inbox_repo}/issues`,
+        "-f",
+        `title=rsrobo: ask on ${owner}/${repo}#${values.issue}`,
+        "-f",
+        `body=${res.html_url}\n\n${body}`,
+        "-f",
+        "labels[]=rsrobo",
+      ],
+      {
+        encoding: "utf8",
+        env: { ...process.env, GH_TOKEN: userToken },
+      },
+    );
+    console.log(res.html_url);
+  } else console.log(body);
+  process.exit(0);
+}
+
 if (task === "init-notes") {
   const rm = target ? /^([\w.-]+)\/([\w.-]+)$/.exec(target) : null;
   if (!rm) fail(usage);
@@ -151,9 +210,7 @@ if (task === "compare") {
 const modelAlias = values.model ?? fail(usage);
 
 const pr = fetchPr(owner, repo, Number(number));
-const repoConfig = Object.entries(
-  config.repos as Record<string, { kb?: Sensitivity[]; fix?: Via[]; providers?: string[] }>,
-).find(([g]) => new RegExp(`^${g.replace(/\*/g, "[^/]*")}$`).test(`${owner}/${repo}`))?.[1];
+const repoConfig = repoPolicy(owner, repo);
 
 // fix: apply chosen findings from the latest saved review, deliver as a patch or as suggestion blocks.
 if (task === "fix") {
@@ -234,10 +291,15 @@ if (values.kb) {
 }
 const dir = checkout(pr, values.work);
 prepare(dir, pr, values.notes);
-try {
-  writeFileSync(join(dir, ".rsrobo", "ci.md"), ciReport(pr));
-} catch (e) {
-  console.error(`ci: ${(e as Error).message.split("\n")[0]}`);
+for (const [name, make] of [
+  ["ci.md", () => ciReport(pr)],
+  ["related.md", () => relatedReport(pr, dir)],
+] as const) {
+  try {
+    writeFileSync(join(dir, ".rsrobo", name), make());
+  } catch (e) {
+    console.error(`${name}: ${(e as Error).message.split("\n")[0]}`);
+  }
 }
 const engine = resolve(modelAlias);
 const verifyEngine = resolve(values.verify ?? modelAlias);

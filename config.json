@@ -19,6 +19,7 @@
   },
   "pi_providers": ["openai-codex", "openrouter", "freeinference"],
   "default_model": "sonnet",
+  "ask_model": "haiku",
   "verify_model": "sonnet",
   "commit_trailer": "Assisted-by: rsrobo",
   "repos": {

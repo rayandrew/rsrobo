@@ -3,7 +3,10 @@ import { test } from "node:test";
 import { type Env, poll } from "../src/index.ts";
 
 // A fake GitHub: records every request, answers from a small table, so poll() runs without the network.
-function fakeGitHub(comments: { id: number; body: string; user: { login: string } }[]) {
+function fakeGitHub(
+  comments: { id: number; body: string; user: { login: string }; html_url?: string }[],
+  type = "PullRequest",
+) {
   const calls: { method: string; url: string; body?: unknown }[] = [];
   const pr = "https://api.github.com/repos/o/r/pulls/7";
   globalThis.fetch = (async (url: string, init?: RequestInit) => {
@@ -16,7 +19,7 @@ function fakeGitHub(comments: { id: number; body: string; user: { login: string 
           id: "1",
           reason: "mention",
           updated_at: "2026-09-30T00:00:00Z",
-          subject: { type: "PullRequest", url: pr, latest_comment_url: `${pr}/comment/${comments.at(-1)?.id}` },
+          subject: { type, url: pr, latest_comment_url: `${pr}/comment/${comments.at(-1)?.id}` },
           repository: { full_name: "o/r" },
         },
       ]);
@@ -92,5 +95,35 @@ test("approve runs their request with my overrides", async () => {
   await poll(env);
   assert.deepEqual(dispatches(calls), [
     { repo: "o/r", pr: "7", requester: "me", model: "sonnet", effort: "medium", focus: "security" },
+  ]);
+});
+
+test("ask on an issue dispatches the question; review on an issue goes to the inbox", async () => {
+  seen.clear();
+  let calls = fakeGitHub(
+    [{ id: 5, body: "@rsrobo ask is retry implemented?", user: { login: "me" }, html_url: "" }],
+    "Issue",
+  );
+  await poll(env);
+  assert.deepEqual(dispatches(calls), [
+    { repo: "o/r", pr: "7", task: "ask", question: "is retry implemented?", requester: "me" },
+  ]);
+  seen.clear();
+  calls = fakeGitHub([{ id: 6, body: "@rsrobo review", user: { login: "me" }, html_url: "" }], "Issue");
+  await poll(env);
+  assert.equal(dispatches(calls).length, 0);
+  assert.ok(calls.some((x) => x.url.endsWith("/repos/me/notes/issues")));
+});
+
+test("a stranger's ask on an issue waits for my approve; no model runs before", async () => {
+  seen.clear();
+  const c = [
+    { id: 7, body: "@rsrobo ask is this implemented?", user: { login: "stranger" }, html_url: "https://x/7" },
+    { id: 8, body: "@rsrobo approve model=haiku", user: { login: "me" }, html_url: "" },
+  ];
+  const calls = fakeGitHub(c, "Issue");
+  await poll(env);
+  assert.deepEqual(dispatches(calls), [
+    { repo: "o/r", pr: "7", task: "ask", question: "is this implemented?", requester: "me", model: "haiku" },
   ]);
 });

@@ -40,3 +40,9 @@ test("provider/model values pass, including openrouter tilde aliases", () => {
 test("approve is a task", () => {
   assert.equal(parseCommand("@rsrobo approve", bot)?.task, "approve");
 });
+
+test("ask keeps the question as free text", () => {
+  const s = parseCommand("@rsrobo ask did we implement retry on 429 in the client?", bot);
+  assert.equal(s?.task, "ask");
+  assert.equal(s?.text, "did we implement retry on 429 in the client?");
+});
