@@ -53,9 +53,12 @@ jobs:
         run: |
           pi install npm:@tintinweb/pi-subagents
           rkb install pi --toon
-          if [ -n "$PI_AUTH_JSON" ]; then mkdir -p ~/.pi/agent && printf '%s' "$PI_AUTH_JSON" > ~/.pi/agent/auth.json && chmod 600 ~/.pi/agent/auth.json; fi
+          mkdir -p ~/.pi/agent
+          node scripts/freeinference-models.ts > ~/.pi/agent/models.json || cp pi/models.json ~/.pi/agent/models.json
+          if [ -n "$PI_AUTH_JSON" ]; then printf '%s' "$PI_AUTH_JSON" > ~/.pi/agent/auth.json && chmod 600 ~/.pi/agent/auth.json; fi
         env:
           PI_AUTH_JSON: ${{ secrets.PI_AUTH_JSON }}
+          FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_API_KEY }}
       - run: |
           if [ "$TASK" = init-notes ]; then
             node src/cli.ts init-notes "$REPO" --notes "$RSROBO_NOTES_DIR" --model "$MODEL" --budget "$BUDGET"
@@ -79,6 +82,7 @@ jobs:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          FREEINFERENCE_API_KEY: ${{ secrets.FREEINFERENCE_API_KEY }}
           RSROBO_NOTES_DIR: ${{ github.workspace }}/notes
           RSROBO_KB_DIR: ${{ github.workspace }}/kb
       - if: always()

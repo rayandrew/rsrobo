@@ -27,7 +27,7 @@ const TASKS = new Set([
   "compare",
   "init-notes",
 ]);
-const TOKEN = /^[A-Za-z0-9_.,*/\-$]+$/;
+const TOKEN = /^[A-Za-z0-9_.,*~/\-$]+$/;
 
 // Parse the text after "@bot". Throws on anything it does not understand; the caller reports the message back.
 export function parseCommand(body: string, botLogin: string): TaskSpec | null {

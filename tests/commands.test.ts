@@ -25,3 +25,14 @@ test("rejects unknown key, url, path escape, unknown task", () => {
   assert.throws(() => parseCommand("@rsrobo review files=../../etc", bot), /bad value/);
   assert.throws(() => parseCommand("@rsrobo deploy", bot), /unknown task/);
 });
+
+test("provider/model values pass, including openrouter tilde aliases", () => {
+  assert.equal(
+    parseCommand("@rsrobo review model=openrouter/~google/gemini-pro-latest", bot)?.args.model,
+    "openrouter/~google/gemini-pro-latest",
+  );
+  assert.equal(
+    parseCommand("@rsrobo review model=freeinference/kimi-k2.7-code", bot)?.args.model,
+    "freeinference/kimi-k2.7-code",
+  );
+});

@@ -35,7 +35,7 @@ import { initNotes, prepare, render, runReview, type Severity, saveReview } from
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const config = JSON.parse(readFileSync(join(root, "config.json"), "utf8"));
 const usage =
-  "usage: rsrobo review owner/repo#N [--model alias] [--verify alias] [--budget usd] [--effort high] [--focus a,b] [--min-severity P2] [--notes dir] [--skills dir] [--post pending|review|inbox|comment] [--save dir] [--kb dir] [--json]\n       rsrobo compare owner/repo#N --models a,b [--effort high] [--budget usd] [--kb dir]\n       rsrobo fix owner/repo#N 2,3|all [--via patch|suggest|stacked|push] [--model alias] [--post]\n       rsrobo init-notes owner/repo [--notes dir] [--force]";
+  "usage: rsrobo review owner/repo#N [--model alias] [--verify alias] [--budget usd] [--effort high] [--focus a,b] [--min-severity P2] [--notes dir] [--skills dir] [--post pending|review|inbox|comment] [--save dir] [--kb dir] [--json]\n       rsrobo compare owner/repo#N --models a,b [--effort high] [--budget usd] [--kb dir]\n       rsrobo fix owner/repo#N 2,3|all [--via patch|suggest|stacked|push] [--model alias] [--post]\n       rsrobo init-notes owner/repo [--notes dir] [--force]\n       rsrobo models";
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -60,6 +60,22 @@ const { values, positionals } = parseArgs({
 });
 
 const [task, target] = positionals;
+
+// models: the aliases, then every model pi offers from an allowed provider, as `provider/model`.
+if (task === "models") {
+  for (const [name, m] of Object.entries(
+    config.models as Record<string, string | { provider: string; model: string }>,
+  )) {
+    console.log(`${name.padEnd(12)} ${typeof m === "string" ? `claude ${m}` : `pi ${m.provider}/${m.model}`}`);
+  }
+  const list = execFileSync("pi", ["--list-models"], { encoding: "utf8" }).split("\n").slice(1);
+  for (const line of list) {
+    const [provider, model] = line.trim().split(/\s+/);
+    if (provider && model && config.pi_providers.includes(provider))
+      console.log(`${"".padEnd(12)} pi ${provider}/${model}`);
+  }
+  process.exit(0);
+}
 // An alias is a Claude model id string, or `{ engine: "pi", provider, model }` for the pi engine.
 type Engine = { engine: "claude"; model: string } | { engine: "pi"; provider: string; model: string };
 // Besides aliases, `provider/model` is accepted for the providers in `pi_providers`, so any model pi knows works.
@@ -134,9 +150,9 @@ if (task === "compare") {
 const modelAlias = values.model ?? fail(usage);
 
 const pr = fetchPr(owner, repo, Number(number));
-const repoConfig = Object.entries(config.repos as Record<string, { kb?: Sensitivity[]; fix?: Via[] }>).find(([g]) =>
-  new RegExp(`^${g.replace(/\*/g, "[^/]*")}$`).test(`${owner}/${repo}`),
-)?.[1];
+const repoConfig = Object.entries(
+  config.repos as Record<string, { kb?: Sensitivity[]; fix?: Via[]; providers?: string[] }>,
+).find(([g]) => new RegExp(`^${g.replace(/\*/g, "[^/]*")}$`).test(`${owner}/${repo}`))?.[1];
 
 // fix: apply chosen findings from the latest saved review, deliver as a patch or as suggestion blocks.
 if (task === "fix") {
@@ -224,6 +240,13 @@ try {
 }
 const engine = resolve(modelAlias);
 const verifyEngine = resolve(values.verify ?? modelAlias);
+// Per-repo provider policy: LLNL work must not go to Chinese-origin models, so freeinference is off there.
+for (const e of [engine, verifyEngine]) {
+  const provider = e.engine === "claude" ? "claude" : e.provider;
+  const allowed = repoConfig?.providers ?? ["claude"];
+  if (!allowed.includes(provider))
+    fail(`provider ${provider} is not allowed on ${owner}/${repo}; allowed: ${allowed.join(", ")}`);
+}
 const common = {
   budgetUsd: Math.min(Number(values.budget), config.max_budget_usd),
   effort: values.effort ?? "high",

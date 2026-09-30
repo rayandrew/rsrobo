@@ -22,7 +22,17 @@
   "verify_model": "sonnet",
   "commit_trailer": "Assisted-by: rsrobo",
   "repos": {
-    "llnl-asr/*": { "post": "pending", "kb": ["public"], "fix": ["patch", "suggest"] },
-    "rayandrew/*": { "post": "pending", "kb": ["public", "internal"], "fix": ["patch", "suggest", "stacked", "push"] }
+    "llnl-asr/*": {
+      "post": "pending",
+      "kb": ["public"],
+      "fix": ["patch", "suggest"],
+      "providers": ["claude", "openai-codex", "openrouter"]
+    },
+    "rayandrew/*": {
+      "post": "pending",
+      "kb": ["public", "internal"],
+      "fix": ["patch", "suggest", "stacked", "push"],
+      "providers": ["claude", "openai-codex", "openrouter", "freeinference"]
+    }
   }
 }
