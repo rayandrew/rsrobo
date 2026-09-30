@@ -15,12 +15,14 @@ on:
       findings: { description: "fix only: 2,3 or all", default: "" }
       via: { description: "fix only: patch | suggest | stacked | push", default: "patch" }
       platform: { description: "linux | macos, for the fix test gate", default: "linux" }
-concurrency:
-  group: review-${{ inputs.repo }}-${{ inputs.pr }}
-  cancel-in-progress: true
 jobs:
   review:
     runs-on: ${{ inputs.platform == 'macos' && 'macos-latest' || 'ubuntu-latest' }}
+    # A newer request for the same PR replaces a running review, but only the review: the lessons job below
+    # has its own group and is never cancelled.
+    concurrency:
+      group: review-${{ inputs.repo }}-${{ inputs.pr }}
+      cancel-in-progress: true
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
