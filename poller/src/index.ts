@@ -26,17 +26,21 @@ const SEEN_TTL = 60 * 60 * 24 * 30;
 
 export default {
   async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
-    ctx.waitUntil(poll(env));
+    ctx.waitUntil(poll(env).catch((e) => console.error(`poll failed: ${(e as Error).message}`)));
   },
 };
 
 export async function poll(env: Env) {
   const notes = (await gh(env.BOT_TOKEN, "/notifications?participating=true")) as Notification[];
+  console.log(
+    `notifications: ${notes.length}${notes.map((n) => ` [${n.reason} ${n.subject.type} ${n.repository.full_name}]`).join("")}`,
+  );
   for (const n of notes) {
     // Issues take only `ask`; the rest needs a pull request. handle() sorts that out.
     if (n.subject.type !== "PullRequest" && n.subject.type !== "Issue") continue;
     if (n.reason === "mention") {
       const comment = await findMention(env, n);
+      console.log(`mention on ${n.subject.url}: comment ${comment?.id ?? "none"} by ${comment?.user.login ?? "-"}`);
       if (comment && !(await env.SEEN.get(`comment:${comment.id}`))) {
         await handle(env, n, comment);
         await env.SEEN.put(`comment:${comment.id}`, "1", { expirationTtl: SEEN_TTL });
@@ -217,6 +221,7 @@ async function run(env: Env, n: Notification, c: Comment, spec: NonNullable<Retu
 }
 
 async function dispatch(env: Env, inputs: Record<string, string>) {
+  console.log(`dispatch: ${JSON.stringify(inputs)}`);
   await gh(env.USER_TOKEN, `/repos/${env.HUB_REPO}/actions/workflows/review.yml/dispatches`, "POST", {
     ref: env.HUB_REF,
     inputs,
