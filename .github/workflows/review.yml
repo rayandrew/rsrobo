@@ -12,12 +12,13 @@ on:
       task: { description: "review | fix | init-notes", default: "review" }
       findings: { description: "fix only: 2,3 or all", default: "" }
       via: { description: "fix only: patch | suggest | stacked | push", default: "patch" }
+      platform: { description: "linux | macos, for the fix test gate", default: "linux" }
 concurrency:
   group: review-${{ inputs.repo }}-${{ inputs.pr }}
   cancel-in-progress: true
 jobs:
   review:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.platform == 'macos' && 'macos-latest' || 'ubuntu-latest' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
@@ -34,7 +35,13 @@ jobs:
           path: kb
       - name: install rkb
         run: |
-          gh release download -R rslib/rkb -p 'rkb-linux-x86_64-*.tar.gz' -O rkb.tar.gz
+          case "$RUNNER_OS-$RUNNER_ARCH" in
+            Linux-X64) asset=linux-x86_64 ;;
+            Linux-ARM64) asset=linux-aarch64 ;;
+            macOS-ARM64) asset=macos-aarch64 ;;
+            *) echo "no rkb binary for $RUNNER_OS-$RUNNER_ARCH" && exit 1 ;;
+          esac
+          gh release download -R rslib/rkb -p "rkb-$asset-*.tar.gz" -O rkb.tar.gz
           tar -xzf rkb.tar.gz && sudo install -m 755 rkb /usr/local/bin/rkb && rkb --version
         env:
           GH_TOKEN: ${{ github.token }}

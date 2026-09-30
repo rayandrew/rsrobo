@@ -85,7 +85,7 @@ async function handle(env: Env, n: Notification, c: Comment) {
       return;
     }
     const inputs: Record<string, string> = { repo, pr: String(pr), task: "fix", findings: spec.text };
-    for (const k of ["model", "budget", "via"]) if (spec.args[k]) inputs[k] = spec.args[k];
+    for (const k of ["model", "budget", "via", "platform"]) if (spec.args[k]) inputs[k] = spec.args[k];
     await dispatch(env, inputs);
     return;
   }
