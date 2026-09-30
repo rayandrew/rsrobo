@@ -44,6 +44,7 @@ Command grammar:
 - Unlisted repos get every fix level, every provider and public plus internal kb lessons; the `repos` entries in `config.json` restrict the LLNL orgs.
 - `@rsrobo init-notes` drafts `<owner>/<repo>/CLAUDE.md` in the notes repo from the default branch. It never overwrites an existing file.
 - Requesting a review from the bot on the PR page starts a default review. Own repos only; the bot must be a collaborator.
+- Only `rayandrew` can start a run. When someone else mentions the bot, it replies once that only the owner can start it, and the request lands in the inbox with the command to copy. `@rsrobo approve [model=... effort=... budget=...]` on the same PR runs their most recent request; your keys replace theirs, so you can cap the model and effort.
 
 Failed CI checks on the PR head are fetched read-only and handed to the reviewer as `.rsrobo/ci.md`.
 

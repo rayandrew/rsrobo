@@ -36,3 +36,7 @@ test("provider/model values pass, including openrouter tilde aliases", () => {
     "freeinference/kimi-k2.7-code",
   );
 });
+
+test("approve is a task", () => {
+  assert.equal(parseCommand("@rsrobo approve", bot)?.task, "approve");
+});

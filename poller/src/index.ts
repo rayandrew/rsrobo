@@ -80,13 +80,38 @@ async function requestedByAllowed(env: Env, n: Notification): Promise<boolean> {
   const last = events
     .filter((e) => e.event === "review_requested" && e.requested_reviewer?.login === env.BOT_LOGIN)
     .pop();
-  return !!last && env.ALLOWED_COMMENTERS.split(",").includes(last.review_requester?.login ?? "");
+  const ok = !!last && env.ALLOWED_COMMENTERS.split(",").includes(last.review_requester?.login ?? "");
+  if (last && !ok) {
+    const repo = n.repository.full_name;
+    const pr = n.subject.url.split("/").pop();
+    await inbox(
+      env,
+      `rsrobo: review request from @${last.review_requester?.login} on ${repo}#${pr}`,
+      `https://github.com/${repo}/pull/${pr}\n\nTo run it, comment \`@${env.BOT_LOGIN} review\` on the PR.`,
+    );
+  }
+  return ok;
 }
 
 async function handle(env: Env, n: Notification, c: Comment) {
   const repo = n.repository.full_name;
   const pr = n.subject.url.split("/").pop();
-  if (!env.ALLOWED_COMMENTERS.split(",").includes(c.user.login)) return;
+  // Someone else asked: say so once on the PR, and put the request in my inbox with the command to approve it.
+  if (!env.ALLOWED_COMMENTERS.split(",").includes(c.user.login)) {
+    const command = c.body
+      .slice(c.body.search(new RegExp(`@${env.BOT_LOGIN}`, "i")))
+      .split("\n")[0]
+      .trim();
+    await gh(env.BOT_TOKEN, `${n.subject.url.replace("/pulls/", "/issues/")}/comments`, "POST", {
+      body: `Thanks @${c.user.login}. Only @${env.ALLOWED_COMMENTERS.split(",")[0]} can start a run of this bot; they have been notified and can approve it.`,
+    });
+    await inbox(
+      env,
+      `rsrobo: request from @${c.user.login} on ${repo}#${pr}`,
+      `${c.html_url}\n\nThey wrote:\n\n> ${command}\n\nTo run it, comment this on the PR:\n\n\`\`\`\n${command}\n\`\`\``,
+    );
+    return;
+  }
   if (!env.ALLOWED_REPOS.split(",").some((g) => glob(g, repo))) return;
 
   let spec: ReturnType<typeof parseCommand>;
@@ -97,6 +122,41 @@ async function handle(env: Env, n: Notification, c: Comment) {
     return;
   }
   if (!spec) return;
+  // `approve [key=value ...]`: run the most recent request someone else made on this PR. My keys replace theirs,
+  // so `approve model=sonnet effort=medium` caps what they asked for.
+  if (spec.task === "approve") {
+    const all = (await gh(
+      env.BOT_TOKEN,
+      `${n.subject.url.replace("/pulls/", "/issues/")}/comments?per_page=100`,
+    )) as Comment[];
+    const mention = new RegExp(`@${env.BOT_LOGIN}\\b`, "i");
+    const theirs = all
+      .filter((x) => x.id < c.id && mention.test(x.body) && !env.ALLOWED_COMMENTERS.split(",").includes(x.user.login))
+      .pop();
+    let want: ReturnType<typeof parseCommand> = null;
+    try {
+      want = theirs ? parseCommand(theirs.body, env.BOT_LOGIN) : null;
+    } catch (e) {
+      await inbox(env, `rsrobo: cannot approve on ${repo}#${pr}`, `${theirs?.html_url}\n\n${(e as Error).message}`);
+      return;
+    }
+    if (!want) {
+      await inbox(
+        env,
+        `rsrobo: nothing to approve on ${repo}#${pr}`,
+        `${c.html_url}\n\nNo request from someone else was found.`,
+      );
+      return;
+    }
+    await run(env, n, c, { ...want, args: { ...want.args, ...spec.args } });
+    return;
+  }
+  await run(env, n, c, spec);
+}
+
+async function run(env: Env, n: Notification, c: Comment, spec: NonNullable<ReturnType<typeof parseCommand>>) {
+  const repo = n.repository.full_name;
+  const pr = n.subject.url.split("/").pop();
   if (spec.task === "fix") {
     if (!/^(all|\d+(,\d+)*)$/.test(spec.text)) {
       await inbox(env, `rsrobo: bad fix command on ${repo}#${pr}`, `${c.html_url}\n\nUse \`fix 2,3\` or \`fix all\`.`);

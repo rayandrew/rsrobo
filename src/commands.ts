@@ -26,6 +26,7 @@ const TASKS = new Set([
   "changelog",
   "compare",
   "init-notes",
+  "approve",
 ]);
 const TOKEN = /^[A-Za-z0-9_.,*~/\-$]+$/;
 
