@@ -6,6 +6,7 @@ Personal, mention-driven PR review bot. Runs `claude -p` on a PR checkout; posts
 
 ```
 node src/cli.ts review owner/repo#N --model sonnet --budget 2
+node src/cli.ts compare owner/repo#N --models sonnet,opus   # bake-off, parallel, prints a comparison
 npm run check      # biome lint+format, tsc, tests
 npm run fix        # apply biome fixes
 ```

@@ -26,8 +26,8 @@ If you are not certain a finding is real, leave it out. A false report costs mor
 1. Read `.rsrobo/diff.patch`. Group the changed files by module.
 2. For each group, read every changed file in full, tests included. Use Grep to find every caller of a changed function, type, or constant, and read those too. Do not answer before you have read all of them.
 3. Collect candidate findings with file, lines, and the claim.
-4. Send each candidate to the `verify` subagent. Keep only the ones it confirms. Run independent verifications in parallel.
-5. Think the result through, then answer in the schema.
+4. Send each candidate to the `verify` subagent. Keep only the ones it confirms. Run independent verifications in parallel, in the foreground. Wait for every verifier before you answer. Never start background work.
+5. Think the result through, then answer in the schema. Answer once.
 </procedure>
 
 Severity: P0 data loss or security. P1 wrong behavior. P2 needs a maintainer decision. P3 minor.

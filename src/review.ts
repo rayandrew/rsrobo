@@ -241,6 +241,8 @@ const table = (head: string[], rows: string[][]) =>
     "\n",
   );
 
+export const permalinkWhere = (pr: Pr, f: Finding) => where(pr, f);
+
 const where = (pr: Pr, f: Finding) => {
   const name = f.file.split("/").pop();
   const span = f.line_end > f.line_start ? `${f.line_start}-${f.line_end}` : `${f.line_start}`;

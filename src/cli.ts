@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { compareMd } from "./compare.ts";
 import { checkout, fetchPr } from "./github.ts";
 import { pruneKb, type Sensitivity } from "./kb.ts";
 import { type PostMode, postComment, postInbox, postLessons, postReview } from "./post.ts";
@@ -12,7 +13,7 @@ import { prepare, render, runReview, type Severity, saveReview } from "./review.
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const config = JSON.parse(readFileSync(join(root, "config.json"), "utf8"));
 const usage =
-  "usage: rsrobo review owner/repo#N [--model alias] [--verify alias] [--budget usd] [--effort high] [--focus a,b] [--min-severity P2] [--notes dir] [--skills dir] [--post pending|review|inbox|comment] [--save dir] [--kb dir] [--json]";
+  "usage: rsrobo review owner/repo#N [--model alias] [--verify alias] [--budget usd] [--effort high] [--focus a,b] [--min-severity P2] [--notes dir] [--skills dir] [--post pending|review|inbox|comment] [--save dir] [--kb dir] [--json]\n       rsrobo compare owner/repo#N --models a,b [--effort high] [--budget usd] [--kb dir]";
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -29,13 +30,43 @@ const { values, positionals } = parseArgs({
     save: { type: "string", default: process.env.RSROBO_NOTES_DIR },
     kb: { type: "string", default: process.env.RSROBO_KB_DIR },
     json: { type: "boolean", default: false },
+    models: { type: "string" },
+    work: { type: "string", default: process.env.RSROBO_WORK_DIR ?? join(root, ".work") },
   },
 });
 
 const [task, target] = positionals;
-const m = task === "review" && target ? /^([\w.-]+)\/([\w.-]+)#(\d+)$/.exec(target) : null;
+const m = (task === "review" || task === "compare") && target ? /^([\w.-]+)\/([\w.-]+)#(\d+)$/.exec(target) : null;
 if (!m) fail(usage);
 const [, owner, repo, number] = m;
+
+// compare: one child review per model, each in its own work dir, then one comparison table.
+if (task === "compare") {
+  const aliases = (values.models ?? fail("compare needs --models a,b")).split(",");
+  const settled = await Promise.allSettled(
+    aliases.map(async (alias) => {
+      const args = [process.argv[1], "review", target, "--model", alias, "--json", "--save", ""];
+      if (values.effort) args.push("--effort", values.effort);
+      if (values.budget) args.push("--budget", values.budget);
+      if (values.kb) args.push("--kb", values.kb);
+      const env = { ...process.env, RSROBO_WORK_DIR: join(values.work, `compare-${alias}`), RSROBO_NOTES_DIR: "" };
+      const out = await new Promise<string>((ok, no) => {
+        const c = spawn(process.execPath, args, { env, stdio: ["ignore", "pipe", "inherit"] });
+        let s = "";
+        c.stdout.on("data", (d) => {
+          s += d;
+        });
+        c.on("close", (code) => (code === 0 ? ok(s) : no(new Error(`${alias}: review exited ${code}`))));
+      });
+      return { alias, result: JSON.parse(out) };
+    }),
+  );
+  const runs = settled.flatMap((s) => (s.status === "fulfilled" ? [s.value] : []));
+  for (const s of settled) if (s.status === "rejected") console.error(String(s.reason));
+  if (!runs.length) fail("every model failed");
+  console.log(compareMd(fetchPr(owner, repo, Number(number)), runs));
+  process.exit(0);
+}
 const modelAlias = values.model ?? fail(usage);
 const alias = (name: string) =>
   config.models[name] ?? fail(`unknown model alias "${name}"; known: ${Object.keys(config.models).join(", ")}`);
@@ -48,7 +79,7 @@ if (values.kb) {
   const { kept, removed } = pruneKb(values.kb, repoConfig?.kb ?? ["public"]);
   console.error(`kb: ${kept} lessons kept, ${removed} removed`);
 }
-const dir = checkout(pr, join(root, ".work"));
+const dir = checkout(pr, values.work);
 prepare(dir, pr, values.notes);
 const result = runReview(dir, pr, {
   model: alias(modelAlias),
