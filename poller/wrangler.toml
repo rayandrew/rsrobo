@@ -15,6 +15,6 @@ HUB_REPO = "rayandrew/rsrobo"
 HUB_REF = "trunk"
 INBOX_REPO = "rayandrew/rsrobo-notes"
 ALLOWED_COMMENTERS = "rayandrew"
-ALLOWED_REPOS = "rayandrew/*,llnl-asr/*"
+ALLOWED_REPOS = "*/*"
 
 # secrets, set with `wrangler secret put`: BOT_TOKEN, USER_TOKEN

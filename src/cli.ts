@@ -159,7 +159,7 @@ if (task === "fix") {
   const spec = positionals[2] ?? fail(usage);
   const via = values.via as Via;
   if (!["patch", "suggest", "stacked", "push"].includes(via)) fail(usage);
-  const allowedVia: Via[] = repoConfig?.fix ?? ["patch", "suggest"];
+  const allowedVia: Via[] = repoConfig?.fix ?? ["patch", "suggest", "stacked", "push"];
   if (!allowedVia.includes(via))
     fail(`via=${via} is not allowed on ${owner}/${repo}; allowed: ${allowedVia.join(", ")}`);
   const dir = checkout(pr, values.work);
@@ -228,7 +228,7 @@ if (task === "fix") {
   process.exit(0);
 }
 if (values.kb) {
-  const { kept, removed } = pruneKb(values.kb, repoConfig?.kb ?? ["public"]);
+  const { kept, removed } = pruneKb(values.kb, repoConfig?.kb ?? ["public", "internal"]);
   console.error(`kb: ${kept} lessons kept, ${removed} removed`);
 }
 const dir = checkout(pr, values.work);
@@ -243,7 +243,7 @@ const verifyEngine = resolve(values.verify ?? modelAlias);
 // Per-repo provider policy: LLNL work must not go to Chinese-origin models, so freeinference is off there.
 for (const e of [engine, verifyEngine]) {
   const provider = e.engine === "claude" ? "claude" : e.provider;
-  const allowed = repoConfig?.providers ?? ["claude"];
+  const allowed = repoConfig?.providers ?? ["claude", ...config.pi_providers];
   if (!allowed.includes(provider))
     fail(`provider ${provider} is not allowed on ${owner}/${repo}; allowed: ${allowed.join(", ")}`);
 }

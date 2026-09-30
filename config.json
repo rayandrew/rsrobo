@@ -2,7 +2,7 @@
   "bot_login": "rsrobo",
   "inbox_repo": "rayandrew/rsrobo-notes",
   "allowed_commenters": ["rayandrew"],
-  "allowed_repos": ["rayandrew/*", "llnl-asr/*"],
+  "allowed_repos": ["*/*"],
   "default_post": "pending",
   "default_budget_usd": 3,
   "max_budget_usd": 10,
@@ -28,7 +28,25 @@
       "fix": ["patch", "suggest"],
       "providers": ["claude", "openai-codex", "openrouter"]
     },
+    "llnl/*": {
+      "post": "pending",
+      "kb": ["public"],
+      "fix": ["patch", "suggest"],
+      "providers": ["claude", "openai-codex", "openrouter"]
+    },
+    "dftracer/*": {
+      "post": "pending",
+      "kb": ["public"],
+      "fix": ["patch", "suggest"],
+      "providers": ["claude", "openai-codex", "openrouter"]
+    },
     "rayandrew/*": {
+      "post": "pending",
+      "kb": ["public", "internal"],
+      "fix": ["patch", "suggest", "stacked", "push"],
+      "providers": ["claude", "openai-codex", "openrouter", "freeinference"]
+    },
+    "rslib/*": {
       "post": "pending",
       "kb": ["public", "internal"],
       "fix": ["patch", "suggest", "stacked", "push"],

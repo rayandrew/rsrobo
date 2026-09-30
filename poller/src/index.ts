@@ -43,10 +43,14 @@ async function poll(env: Env) {
     } else if (n.reason === "review_requested") {
       // A review request from the PR page (own repos only; the bot must be a collaborator) means `review` with defaults.
       const key = `request:${n.subject.url}:${n.updated_at}`;
-      if (!(await env.SEEN.get(key)) && env.ALLOWED_REPOS.split(",").some((g) => glob(g, n.repository.full_name))) {
+      if (
+        !(await env.SEEN.get(key)) &&
+        env.ALLOWED_REPOS.split(",").some((g) => glob(g, n.repository.full_name)) &&
+        (await requestedByAllowed(env, n))
+      ) {
         await dispatch(env, { repo: n.repository.full_name, pr: String(n.subject.url.split("/").pop()) });
-        await env.SEEN.put(key, "1", { expirationTtl: SEEN_TTL });
       }
+      await env.SEEN.put(key, "1", { expirationTtl: SEEN_TTL });
     } else continue;
     await gh(env.BOT_TOKEN, `/notifications/threads/${n.id}`, "PATCH");
   }
@@ -63,6 +67,20 @@ async function findMention(env: Env, n: Notification): Promise<Comment | null> {
   const prUrl = n.subject.url.replace("/pulls/", "/issues/");
   const recent = (await gh(env.BOT_TOKEN, `${prUrl}/comments?since=${since}`)) as Comment[];
   return recent.reverse().find((c) => mention.test(c.body)) ?? null;
+}
+
+// The notification does not say who asked; the PR timeline does. Only an allowed commenter may request the bot.
+async function requestedByAllowed(env: Env, n: Notification): Promise<boolean> {
+  const url = `${n.subject.url.replace("/pulls/", "/issues/")}/timeline?per_page=100`;
+  const events = (await gh(env.BOT_TOKEN, url)) as {
+    event: string;
+    review_requester?: { login: string };
+    requested_reviewer?: { login: string };
+  }[];
+  const last = events
+    .filter((e) => e.event === "review_requested" && e.requested_reviewer?.login === env.BOT_LOGIN)
+    .pop();
+  return !!last && env.ALLOWED_COMMENTERS.split(",").includes(last.review_requester?.login ?? "");
 }
 
 async function handle(env: Env, n: Notification, c: Comment) {
