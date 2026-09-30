@@ -52,6 +52,12 @@ Command grammar:
 
 Failed CI checks on the PR head are fetched read-only and handed to the reviewer as `.rsrobo/ci.md`. Related work goes to `.rsrobo/related.md`: issues the PR references, open PRs on the same files, earlier PRs on the same files from the git log, and open issues that name the changed files. No model is involved in either.
 
+## Knowledge base
+
+The reviewer, the verifier and `ask` read the kb through rkb's MCP server, limited to `rkb_search` and `rkb_show`. The job clones `rayandrew/kb` and prunes it to the sensitivity each repo may see (`kb` in `config.json`: `public` for the LLNL orgs, `public` and `internal` for mine).
+
+The reviewer also proposes lessons in rkb's shape: type, title, topic, tags, sections, evidence. A separate `lessons` job writes them with `rkb add` into a fresh, unpruned clone and pushes with `rkb sync`. That job runs under the `kb-write` concurrency group, so two reviews never push at once; it pulls and searches for each title first, so two reviews of one repo cannot write the same lesson twice. Ids, skips and refusals go to the sticky "rsrobo: lessons to distill" issue and show in `rkb changes`. The job sets `RKB_AUTO_CONFIRM=continue` for rkb's burst limit, which needs an rkb release with that variable.
+
 ## Bench and ledger
 
 `rsrobo bench --model alias --save <notes>` runs every case in `<notes>/bench/cases.json` (a past PR and the defects it must find) and prints found, extra, cost and time, with the change against the last run of the same model. Runs are saved under `<notes>/bench/runs/`. `rsrobo ledger --save <notes>` writes `<notes>/ledger.md`, monthly cost per repo and model from the saved reviews; the workflow refreshes it after every run.

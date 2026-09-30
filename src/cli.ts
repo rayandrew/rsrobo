@@ -25,6 +25,7 @@ import { runGate } from "./gate.ts";
 import { checkout, cloneDefault, fetchPr } from "./github.ts";
 import { pruneKb, type Sensitivity } from "./kb.ts";
 import { ledger, ledgerMd } from "./ledger.ts";
+import { addLessons, kbProject } from "./lessons.ts";
 import {
   commentInbox,
   type PostMode,
@@ -49,8 +50,18 @@ import {
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const config = JSON.parse(readFileSync(join(root, "config.json"), "utf8"));
-const usage =
-  'usage: rsrobo review owner/repo#N [--model alias] [--verify alias] [--budget usd] [--effort high] [--focus a,b] [--min-severity P2] [--notes dir] [--skills dir] [--post pending|review|inbox|comment] [--save dir] [--kb dir] [--json]\n       rsrobo compare owner/repo#N --models a,b [--effort high] [--budget usd] [--kb dir]\n       rsrobo fix owner/repo#N 2,3|all [--via patch|suggest|stacked|push] [--model alias] [--post]\n       rsrobo init-notes owner/repo [--notes dir] [--force]\n       rsrobo ask owner/repo "question" [--issue N --post] [--model alias] [--kb dir]\n       rsrobo models';
+const usage = [
+  "usage: rsrobo review owner/repo#N [--model alias] [--verify alias] [--budget usd] [--effort high] [--focus a,b] [--min-severity P2] [--notes dir] [--skills dir] [--post pending|review|inbox|comment] [--save dir] [--kb dir] [--json]",
+  "       rsrobo compare owner/repo#N --models a,b [--effort high] [--budget usd] [--kb dir]",
+  "       rsrobo fix owner/repo#N 2,3|all [--via patch|suggest|stacked|push] [--model alias] [--post]",
+  "       rsrobo init-notes owner/repo [--notes dir] [--force]",
+  '       rsrobo ask owner/repo "question" [--issue N --post] [--model alias] [--kb dir]',
+  "       rsrobo summarize|triage owner/repo --issue N [--post] [--model alias]",
+  "       rsrobo lessons <review.json> --kb-write dir [--post]",
+  "       rsrobo bench [--model alias] [--save notes] [--kb dir]",
+  "       rsrobo ledger [--save notes]",
+  "       rsrobo models",
+].join("\n");
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -66,6 +77,7 @@ const { values, positionals } = parseArgs({
     post: { type: "string" },
     save: { type: "string", default: process.env.RSROBO_NOTES_DIR },
     kb: { type: "string", default: process.env.RSROBO_KB_DIR },
+    "kb-write": { type: "string", default: process.env.RSROBO_KB_WRITE_DIR },
     json: { type: "boolean", default: false },
     models: { type: "string" },
     via: { type: "string", default: "patch" },
@@ -263,6 +275,34 @@ if (task === "bench") {
   process.exit(0);
 }
 
+// lessons: write the lessons of one saved review into the kb through rkb, and log ids in the inbox. The workflow
+// runs it in its own job under a concurrency group, so only one runner writes the kb at a time.
+if (task === "lessons") {
+  const file = target ?? fail(usage);
+  const kbWrite = values["kb-write"] ?? fail("lessons needs --kb-write <unpruned kb clone>");
+  const saved = JSON.parse(readFileSync(file, "utf8")) as Result & { pr: string };
+  const m2 = /github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/.exec(saved.pr) ?? fail(`no PR url in ${file}`);
+  const lessons = saved.lessons ?? [];
+  if (!lessons.length) {
+    console.log("no lessons");
+    process.exit(0);
+  }
+  const written = addLessons(kbWrite, lessons, kbProject(kbWrite, m2[1], m2[2]), saved.pr);
+  const lines = lessons.map((l) => {
+    const w = written.find((a) => a.title === l.title);
+    const state = w?.id ? `written as ${w.id}` : w?.skipped ? `exists as ${w.skipped}` : `refused: ${w?.error ?? "?"}`;
+    return `${l.type}: ${l.title} (${state})`;
+  });
+  const sync = written.find((a) => a.title === "rkb sync");
+  if (sync) lines.push(`rkb sync failed: ${sync.error}`);
+  console.log(lines.join("\n"));
+  if (values.post) {
+    const userToken = process.env.GH_TOKEN ?? execFileSync("gh", ["auth", "token"], { encoding: "utf8" }).trim();
+    postLessons(fetchPr(m2[1], m2[2], Number(m2[3])), lines, userToken, config.inbox_repo);
+  }
+  process.exit(0);
+}
+
 // ledger: monthly cost per repo and model from the saved reviews, written to <notes>/ledger.md.
 if (task === "ledger") {
   const notes = values.save || fail("ledger needs --save <notes dir> (or RSROBO_NOTES_DIR)");
@@ -446,6 +486,15 @@ if (values.post) {
   const posted = url();
   // Every run also lands in the inbox, so the notes repo keeps a copy of each review.
   const archived = values.post === "inbox" ? posted : postInbox(pr, result, userToken, config.inbox_repo);
+  // Lessons are written into the kb by `rsrobo lessons` in a separate, serialized job; here they are proposed.
+  if (result.lessons.length) {
+    postLessons(
+      pr,
+      result.lessons.map((l) => `${l.type}: ${l.title} (proposed)`),
+      userToken,
+      config.inbox_repo,
+    );
+  }
   console.log(
     `${posted}\n${archived}\n${result.findings.length} findings, $${result.cost_usd.toFixed(2)}, ${result.seconds}s`,
   );

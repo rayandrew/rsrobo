@@ -3,6 +3,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } fr
 import { join } from "node:path";
 import { type Engine, runAgent } from "./agent.ts";
 import { type Pr, permalink } from "./github.ts";
+import { type Lesson, lessonSchema } from "./lessons.ts";
 
 export type Severity = "P0" | "P1" | "P2" | "P3";
 
@@ -26,7 +27,7 @@ export type Review = {
   changes: Change[];
   findings: Finding[];
   skipped: string[];
-  lessons: string[];
+  lessons: Lesson[];
   resolved?: Finding[];
 };
 
@@ -55,7 +56,7 @@ export const reviewSchema = {
       },
     },
     skipped: { type: "array", items: { type: "string" } },
-    lessons: { type: "array", items: { type: "string" } },
+    lessons: { type: "array", items: lessonSchema },
     findings: {
       type: "array",
       items: {
