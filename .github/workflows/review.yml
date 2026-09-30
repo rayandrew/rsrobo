@@ -101,6 +101,7 @@ jobs:
         with:
           name: review-json
           path: .work/*/.rsrobo/review.json
+          include-hidden-files: true
           if-no-files-found: ignore
       - if: always()
         working-directory: notes
@@ -136,6 +137,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           name: review-json
           path: review
