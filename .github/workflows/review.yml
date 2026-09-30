@@ -41,3 +41,13 @@ jobs:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           RSROBO_NOTES_DIR: ${{ github.workspace }}/notes
+      - if: failure()
+        run: |
+          gh issue create -R "$INBOX_REPO" -l rsrobo -t "rsrobo: review failed for $REPO#$PR" \
+            -b "Run: $RUN_URL"
+        env:
+          REPO: ${{ inputs.repo }}
+          PR: ${{ inputs.pr }}
+          INBOX_REPO: rayandrew/rsrobo-notes
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GH_TOKEN: ${{ secrets.USER_TOKEN }}

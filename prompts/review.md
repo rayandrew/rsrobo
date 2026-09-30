@@ -43,6 +43,6 @@ Refer to code as `path:line` or `path:line-line` in backticks, for example `src/
 `evidence`: two to five items. Each starts with a code reference, then one clause that says what that code does.
 `fix`: one line.
 `suggested_patch`: only when the fix is small and complete on its own.
-`map`: two to four lines. What the PR changes. Which files to read first.
+`map`: two to four lines. What the PR changes. Which files to read first. Do not mention the findings or your process.
 `changes`: up to 15 rows. `area` is a file or a directory group. `change` is one clause.
 `skipped`: only files you did not read, one entry per file with the reason.
