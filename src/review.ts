@@ -125,6 +125,8 @@ export function runReview(dir: string, pr: Pr, o: Options): Result {
       "--output-format",
       "json",
       "--no-session-persistence",
+      "--setting-sources",
+      "project",
       "--tools",
       "Read,Grep,Glob,Agent",
       "--permission-prompts",
@@ -204,9 +206,9 @@ export function overview(pr: Pr, r: Result, shown: Finding[]): string {
 }
 
 // One finding as a comment body: title, problem, evidence bullets, fix, then collapsed patch and agent text.
-export function findingMd(pr: Pr, f: Finding, withWhere = true): string {
+export function findingMd(pr: Pr, f: Finding, withWhere = true, n?: number): string {
   const out = [
-    `**${f.severity} ${f.title}**${withWhere ? ` at ${where(pr, f)}` : ""}`,
+    `**${n ? `${n}. ` : ""}${f.severity} ${f.title}**${withWhere ? ` at ${where(pr, f)}` : ""}`,
     linkify(pr, f.problem),
     f.evidence.map((e) => `- ${linkify(pr, e)}`).join("\n"),
     `Fix: ${linkify(pr, f.fix)}`,
@@ -224,7 +226,7 @@ export function findingMd(pr: Pr, f: Finding, withWhere = true): string {
 
 export function render(pr: Pr, r: Result, minSeverity: Severity = "P3"): string {
   const shown = shownFindings(r, minSeverity);
-  return [overview(pr, r, shown), ...shown.map((f) => findingMd(pr, f))].join("\n\n---\n\n");
+  return [overview(pr, r, shown), ...shown.map((f, i) => findingMd(pr, f, true, i + 1))].join("\n\n---\n\n");
 }
 
 const agentText = (pr: Pr, f: Finding) =>

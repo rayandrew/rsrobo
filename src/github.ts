@@ -46,6 +46,8 @@ export function checkout(pr: Pr, workRoot: string): string {
     execFileSync("git", ["clone", "-q", "--filter=blob:none", `https://github.com/${pr.owner}/${pr.repo}.git`, dir]);
   }
   git("fetch", "-q", "origin", `pull/${pr.number}/head`, pr.base);
+  git("reset", "-q", "--hard");
+  git("clean", "-qfd", "-e", ".rsrobo");
   git("checkout", "-q", pr.head);
   mkdirSync(join(dir, ".rsrobo"), { recursive: true });
   writeFileSync(join(dir, ".rsrobo", "diff.patch"), git("diff", `${pr.base}...${pr.head}`));

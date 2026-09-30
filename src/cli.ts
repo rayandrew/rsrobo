@@ -5,15 +5,24 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { compareMd } from "./compare.ts";
+import { fixMd, loadFindings, patchApplies, pick, runFix, type Suggestion, suggestions, type Via } from "./fix.ts";
 import { checkout, fetchPr } from "./github.ts";
 import { pruneKb, type Sensitivity } from "./kb.ts";
-import { type PostMode, postComment, postInbox, postLessons, postReview } from "./post.ts";
+import {
+  commentInbox,
+  type PostMode,
+  postComment,
+  postInbox,
+  postLessons,
+  postReview,
+  postSuggestions,
+} from "./post.ts";
 import { prepare, render, runReview, type Severity, saveReview } from "./review.ts";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const config = JSON.parse(readFileSync(join(root, "config.json"), "utf8"));
 const usage =
-  "usage: rsrobo review owner/repo#N [--model alias] [--verify alias] [--budget usd] [--effort high] [--focus a,b] [--min-severity P2] [--notes dir] [--skills dir] [--post pending|review|inbox|comment] [--save dir] [--kb dir] [--json]\n       rsrobo compare owner/repo#N --models a,b [--effort high] [--budget usd] [--kb dir]";
+  "usage: rsrobo review owner/repo#N [--model alias] [--verify alias] [--budget usd] [--effort high] [--focus a,b] [--min-severity P2] [--notes dir] [--skills dir] [--post pending|review|inbox|comment] [--save dir] [--kb dir] [--json]\n       rsrobo compare owner/repo#N --models a,b [--effort high] [--budget usd] [--kb dir]\n       rsrobo fix owner/repo#N 2,3|all [--via patch|suggest] [--model alias] [--post]";
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -31,12 +40,14 @@ const { values, positionals } = parseArgs({
     kb: { type: "string", default: process.env.RSROBO_KB_DIR },
     json: { type: "boolean", default: false },
     models: { type: "string" },
+    via: { type: "string", default: "patch" },
     work: { type: "string", default: process.env.RSROBO_WORK_DIR ?? join(root, ".work") },
   },
 });
 
 const [task, target] = positionals;
-const m = (task === "review" || task === "compare") && target ? /^([\w.-]+)\/([\w.-]+)#(\d+)$/.exec(target) : null;
+const m =
+  ["review", "compare", "fix"].includes(task ?? "") && target ? /^([\w.-]+)\/([\w.-]+)#(\d+)$/.exec(target) : null;
 if (!m) fail(usage);
 const [, owner, repo, number] = m;
 
@@ -72,6 +83,59 @@ const alias = (name: string) =>
   config.models[name] ?? fail(`unknown model alias "${name}"; known: ${Object.keys(config.models).join(", ")}`);
 
 const pr = fetchPr(owner, repo, Number(number));
+
+// fix: apply chosen findings from the latest saved review, deliver as a patch or as suggestion blocks.
+if (task === "fix") {
+  const spec = positionals[2] ?? fail(usage);
+  const via = values.via as Via;
+  if (!["patch", "suggest"].includes(via)) fail(usage);
+  const dir = checkout(pr, values.work);
+  prepare(dir, pr, values.notes);
+  const saved = loadFindings(pr, values.save || undefined, dir);
+  const prPatch = readFileSync(join(dir, ".rsrobo", "diff.patch"), "utf8");
+  const chosen = pick(saved, spec);
+  const parts: string[] = [];
+  let comments: Suggestion[] = [];
+  let leftover = 0;
+  for (const f of chosen) {
+    const { patch, note } = runFix(dir, pr, f, {
+      model: alias(modelAlias),
+      budgetUsd: Math.min(Number(values.budget), config.max_budget_usd),
+      promptsDir: join(root, "prompts"),
+    });
+    execFileSync("git", ["-C", dir, "checkout", "-q", "--", "."]);
+    execFileSync("git", ["-C", dir, "clean", "-qfd", "-e", ".rsrobo", "-e", "CLAUDE.md", "-e", ".claude"]);
+    const applies = patchApplies(dir, patch);
+    parts.push(fixMd(pr, f, patch, note, applies));
+    if (via === "suggest" && applies) {
+      const s = suggestions(prPatch, patch);
+      comments = comments.concat(s.comments);
+      leftover += s.leftover;
+    }
+  }
+  const body = parts.join("\n\n---\n\n");
+  if (!values.post) {
+    console.log(body);
+    process.exit(0);
+  }
+  const userToken = process.env.GH_TOKEN ?? execFileSync("gh", ["auth", "token"], { encoding: "utf8" }).trim();
+  const urls = [commentInbox(pr, userToken, config.inbox_repo, body)];
+  if (via === "suggest" && comments.length) {
+    const note = leftover
+      ? ` ${leftover} hunk${leftover === 1 ? "" : "s"} outside the diff or too large; see the inbox patch.`
+      : "";
+    urls.push(
+      postSuggestions(
+        pr,
+        userToken,
+        comments,
+        `${comments.length} suggestion${comments.length === 1 ? "" : "s"} from rsrobo fix.${note}`,
+      ),
+    );
+  }
+  console.log(urls.filter(Boolean).join("\n"));
+  process.exit(0);
+}
 const repoConfig = Object.entries(config.repos as Record<string, { kb?: Sensitivity[] }>).find(([g]) =>
   new RegExp(`^${g.replace(/\*/g, "[^/]*")}$`).test(`${owner}/${repo}`),
 )?.[1];

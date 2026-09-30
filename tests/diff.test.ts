@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { commentableLines, inDiff } from "../src/diff.ts";
+import { commentableLines, inDiff, parseHunks } from "../src/diff.ts";
 
 const patch = `diff --git a/x.py b/x.py
 --- a/x.py
@@ -29,4 +29,20 @@ test("hunk lines on the right side", () => {
   assert.ok(inDiff(m, "x.py", 2, 4));
   assert.ok(!inDiff(m, "x.py", 4, 11));
   assert.ok(!inDiff(m, "missing.py", 1, 1));
+});
+
+test("parseHunks reads old range and new text", () => {
+  const fix = `--- a/x.py
++++ b/x.py
+@@ -2,3 +2,3 @@
+ b
+-c
++C
+ e
+@@ -11,0 +12,1 @@
++new
+`;
+  const h = parseHunks(fix);
+  assert.deepEqual(h[0], { file: "x.py", oldStart: 2, oldCount: 3, newLines: ["b", "C", "e"] });
+  assert.deepEqual(h[1], { file: "x.py", oldStart: 11, oldCount: 0, newLines: ["new"] });
 });

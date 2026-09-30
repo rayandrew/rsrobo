@@ -70,6 +70,16 @@ async function handle(env: Env, n: Notification, c: Comment) {
     return;
   }
   if (!spec) return;
+  if (spec.task === "fix") {
+    if (!/^(all|\d+(,\d+)*)$/.test(spec.text)) {
+      await inbox(env, `rsrobo: bad fix command on ${repo}#${pr}`, `${c.html_url}\n\nUse \`fix 2,3\` or \`fix all\`.`);
+      return;
+    }
+    const inputs: Record<string, string> = { repo, pr: String(pr), task: "fix", findings: spec.text };
+    for (const k of ["model", "budget", "via"]) if (spec.args[k]) inputs[k] = spec.args[k];
+    await dispatch(env, inputs);
+    return;
+  }
   if (spec.task !== "review") {
     await inbox(
       env,
@@ -81,6 +91,10 @@ async function handle(env: Env, n: Notification, c: Comment) {
   const inputs: Record<string, string> = { repo, pr: String(pr) };
   for (const k of ["post", "model", "budget", "focus", "effort"]) if (spec.args[k]) inputs[k] = spec.args[k];
   if (spec.text) inputs.focus = [inputs.focus, spec.text].filter(Boolean).join("; ");
+  await dispatch(env, inputs);
+}
+
+async function dispatch(env: Env, inputs: Record<string, string>) {
   await gh(env.USER_TOKEN, `/repos/${env.HUB_REPO}/actions/workflows/review.yml/dispatches`, "POST", {
     ref: env.HUB_REF,
     inputs,

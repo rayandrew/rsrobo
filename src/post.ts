@@ -46,9 +46,9 @@ export function postReview(
     line: f.line_end,
     side: "RIGHT",
     ...(f.line_end > f.line_start ? { start_line: f.line_start, start_side: "RIGHT" } : {}),
-    body: findingMd(pr, f, false),
+    body: findingMd(pr, f, false, shown.indexOf(f) + 1),
   }));
-  const parts = [overview(pr, r, shown), ...rest.map((f) => findingMd(pr, f))];
+  const parts = [overview(pr, r, shown), ...rest.map((f) => findingMd(pr, f, true, shown.indexOf(f) + 1))];
   if (mode === "review") parts.push(AI_NOTE);
   const body = parts.join("\n\n---\n\n");
   const req = { commit_id: pr.head, body, comments, ...(mode === "review" ? { event: "COMMENT" } : {}) };
@@ -114,4 +114,28 @@ export function postLessons(pr: Pr, lessons: string[], token: string, inboxRepo:
   const body = `${pr.html_url} at ${pr.head.slice(0, 7)}\n\n${lessons.map((l) => `- ${l}`).join("\n")}`;
   gh(token, ["-X", "POST", `repos/${inboxRepo}/issues/${issue.number}/comments`], { body });
   return issue.html_url;
+}
+
+// A pending review under my account holding suggestion blocks; the body carries the hunks that did not map.
+export function postSuggestions(
+  pr: Pr,
+  token: string,
+  comments: import("./fix.ts").Suggestion[],
+  body: string,
+): string {
+  const base = `repos/${pr.owner}/${pr.repo}/pulls/${pr.number}/reviews`;
+  const res = gh(token, ["-X", "POST", base], { commit_id: pr.head, body, comments }) as { html_url: string };
+  return res.html_url;
+}
+
+export function commentInbox(pr: Pr, token: string, inboxRepo: string, body: string): string | null {
+  const open = gh(token, ["--paginate", `repos/${inboxRepo}/issues?labels=rsrobo&state=open&per_page=100`]) as {
+    number: number;
+    body: string;
+    html_url: string;
+  }[];
+  const mine = open.find((i) => i.body?.startsWith(MARKER(pr)));
+  if (!mine) return null;
+  gh(token, ["-X", "POST", `repos/${inboxRepo}/issues/${mine.number}/comments`], { body });
+  return mine.html_url;
 }
