@@ -33,12 +33,21 @@ export default {
 async function poll(env: Env) {
   const notes = (await gh(env.BOT_TOKEN, "/notifications?participating=true")) as Notification[];
   for (const n of notes) {
-    if (n.reason !== "mention" || n.subject.type !== "PullRequest") continue;
-    const comment = await findMention(env, n);
-    if (comment && !(await env.SEEN.get(`comment:${comment.id}`))) {
-      await handle(env, n, comment);
-      await env.SEEN.put(`comment:${comment.id}`, "1", { expirationTtl: SEEN_TTL });
-    }
+    if (n.subject.type !== "PullRequest") continue;
+    if (n.reason === "mention") {
+      const comment = await findMention(env, n);
+      if (comment && !(await env.SEEN.get(`comment:${comment.id}`))) {
+        await handle(env, n, comment);
+        await env.SEEN.put(`comment:${comment.id}`, "1", { expirationTtl: SEEN_TTL });
+      }
+    } else if (n.reason === "review_requested") {
+      // A review request from the PR page (own repos only; the bot must be a collaborator) means `review` with defaults.
+      const key = `request:${n.subject.url}:${n.updated_at}`;
+      if (!(await env.SEEN.get(key)) && env.ALLOWED_REPOS.split(",").some((g) => glob(g, n.repository.full_name))) {
+        await dispatch(env, { repo: n.repository.full_name, pr: String(n.subject.url.split("/").pop()) });
+        await env.SEEN.put(key, "1", { expirationTtl: SEEN_TTL });
+      }
+    } else continue;
     await gh(env.BOT_TOKEN, `/notifications/threads/${n.id}`, "PATCH");
   }
 }
