@@ -16,6 +16,7 @@
   "default_model": "sonnet",
   "verify_model": "sonnet",
   "repos": {
-    "llnl-asr/*": { "post": "pending" }
+    "llnl-asr/*": { "post": "pending", "kb": ["public"] },
+    "rayandrew/*": { "post": "pending", "kb": ["public", "internal"] }
   }
 }

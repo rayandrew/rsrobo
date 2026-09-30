@@ -19,14 +19,14 @@ export type Finding = {
 
 export type Change = { area: string; change: string };
 
-export type Review = { map: string; changes: Change[]; findings: Finding[]; skipped: string[] };
+export type Review = { map: string; changes: Change[]; findings: Finding[]; skipped: string[]; lessons: string[] };
 
 export type Result = Review & { model: string; effort: string; cost_usd: number; seconds: number; files: number };
 
 export const reviewSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["map", "changes", "findings", "skipped"],
+  required: ["map", "changes", "findings", "skipped", "lessons"],
   properties: {
     map: { type: "string" },
     changes: {
@@ -39,6 +39,7 @@ export const reviewSchema = {
       },
     },
     skipped: { type: "array", items: { type: "string" } },
+    lessons: { type: "array", items: { type: "string" } },
     findings: {
       type: "array",
       items: {
@@ -61,6 +62,16 @@ export const reviewSchema = {
   },
 };
 
+// The reviewer reads the knowledge base through rkb's MCP server; only search and show are exposed.
+const KB_TOOLS = ["mcp__rkb__rkb_search", "mcp__rkb__rkb_show"];
+const kbArgs = [
+  "--strict-mcp-config",
+  "--mcp-config",
+  JSON.stringify({ mcpServers: { rkb: { command: "rkb", args: ["mcp"] } } }),
+  "--allowedTools",
+  ...KB_TOOLS,
+];
+
 export type Options = {
   model: string;
   verifyModel: string;
@@ -69,6 +80,7 @@ export type Options = {
   focus?: string;
   notesDir?: string;
   skillsDir?: string;
+  kbDir?: string;
   promptsDir: string;
 };
 
@@ -101,7 +113,7 @@ export function runReview(dir: string, pr: Pr, o: Options): Result {
     verify: {
       description: "Confirms or rejects one candidate finding by reading the code",
       prompt: readFileSync(join(o.promptsDir, "verify.md"), "utf8"),
-      tools: ["Read", "Grep", "Glob"],
+      tools: ["Read", "Grep", "Glob", ...KB_TOOLS],
       model: o.verifyModel,
     },
   };

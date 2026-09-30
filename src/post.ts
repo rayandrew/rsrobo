@@ -95,3 +95,23 @@ export function postComment(pr: Pr, r: Result, token: string, botLogin: string):
   const res = gh(token, ["-X", "POST", base], { body }) as { html_url: string };
   return res.html_url;
 }
+
+// Lessons the reviewer proposed go to one sticky issue in the notes repo, one comment per run, for me to distill with rkb.
+export function postLessons(pr: Pr, lessons: string[], token: string, inboxRepo: string): string | null {
+  if (!lessons.length) return null;
+  const title = "rsrobo: lessons to distill";
+  const open = gh(token, ["--paginate", `repos/${inboxRepo}/issues?labels=rsrobo-lessons&state=open&per_page=100`]) as {
+    number: number;
+    html_url: string;
+  }[];
+  const issue =
+    open[0] ??
+    (gh(token, ["-X", "POST", `repos/${inboxRepo}/issues`], {
+      title,
+      body: "Each comment holds the lessons one review proposed. Turn the good ones into rkb lessons, then delete the comment.",
+      labels: ["rsrobo-lessons"],
+    }) as { number: number; html_url: string });
+  const body = `${pr.html_url} at ${pr.head.slice(0, 7)}\n\n${lessons.map((l) => `- ${l}`).join("\n")}`;
+  gh(token, ["-X", "POST", `repos/${inboxRepo}/issues/${issue.number}/comments`], { body });
+  return issue.html_url;
+}

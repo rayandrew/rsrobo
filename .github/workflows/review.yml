@@ -24,6 +24,17 @@ jobs:
           token: ${{ secrets.USER_TOKEN }}
           ref: trunk
           path: notes
+      - uses: actions/checkout@v6
+        with:
+          repository: rayandrew/kb
+          token: ${{ secrets.USER_TOKEN }}
+          path: kb
+      - name: install rkb
+        run: |
+          gh release download -R rslib/rkb -p 'rkb-linux-x86_64-*.tar.gz' -O rkb.tar.gz
+          tar -xzf rkb.tar.gz && sudo install -m 755 rkb /usr/local/bin/rkb && rkb --version
+        env:
+          GH_TOKEN: ${{ github.token }}
       - uses: actions/setup-node@v6
         with: { node-version: 26, cache: npm }
       - run: npm ci
@@ -41,6 +52,7 @@ jobs:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           RSROBO_NOTES_DIR: ${{ github.workspace }}/notes
+          RSROBO_KB_DIR: ${{ github.workspace }}/kb
       - if: always()
         working-directory: notes
         run: |

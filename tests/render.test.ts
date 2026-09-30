@@ -21,6 +21,7 @@ const result: Result = {
   map: "One file.",
   changes: [{ area: "y.py", change: "adds a thing" }],
   skipped: ["gen.pb.go: generated"],
+  lessons: [],
   findings: [
     {
       file: "x.py",

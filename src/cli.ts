@@ -5,13 +5,14 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { checkout, fetchPr } from "./github.ts";
-import { type PostMode, postComment, postInbox, postReview } from "./post.ts";
+import { pruneKb, type Sensitivity } from "./kb.ts";
+import { type PostMode, postComment, postInbox, postLessons, postReview } from "./post.ts";
 import { prepare, render, runReview, type Severity, saveReview } from "./review.ts";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const config = JSON.parse(readFileSync(join(root, "config.json"), "utf8"));
 const usage =
-  "usage: rsrobo review owner/repo#N [--model alias] [--verify alias] [--budget usd] [--effort high] [--focus a,b] [--min-severity P2] [--notes dir] [--skills dir] [--post pending|review|inbox|comment] [--save dir] [--json]";
+  "usage: rsrobo review owner/repo#N [--model alias] [--verify alias] [--budget usd] [--effort high] [--focus a,b] [--min-severity P2] [--notes dir] [--skills dir] [--post pending|review|inbox|comment] [--save dir] [--kb dir] [--json]";
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -26,6 +27,7 @@ const { values, positionals } = parseArgs({
     skills: { type: "string", default: process.env.RSROBO_SKILLS_DIR },
     post: { type: "string" },
     save: { type: "string", default: process.env.RSROBO_NOTES_DIR },
+    kb: { type: "string", default: process.env.RSROBO_KB_DIR },
     json: { type: "boolean", default: false },
   },
 });
@@ -39,6 +41,13 @@ const alias = (name: string) =>
   config.models[name] ?? fail(`unknown model alias "${name}"; known: ${Object.keys(config.models).join(", ")}`);
 
 const pr = fetchPr(owner, repo, Number(number));
+const repoConfig = Object.entries(config.repos as Record<string, { kb?: Sensitivity[] }>).find(([g]) =>
+  new RegExp(`^${g.replace(/\*/g, "[^/]*")}$`).test(`${owner}/${repo}`),
+)?.[1];
+if (values.kb) {
+  const { kept, removed } = pruneKb(values.kb, repoConfig?.kb ?? ["public"]);
+  console.error(`kb: ${kept} lessons kept, ${removed} removed`);
+}
 const dir = checkout(pr, join(root, ".work"));
 prepare(dir, pr, values.notes);
 const result = runReview(dir, pr, {
@@ -48,6 +57,7 @@ const result = runReview(dir, pr, {
   effort: values.effort ?? "high",
   focus: values.focus,
   skillsDir: values.skills,
+  kbDir: values.kb,
   promptsDir: join(root, "prompts"),
 });
 writeFileSync(join(dir, ".rsrobo", "review.json"), JSON.stringify(result, null, 2));
