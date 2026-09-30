@@ -11,34 +11,49 @@ export type Finding = {
   line_end: number;
   severity: Severity;
   title: string;
-  body: string;
+  problem: string;
+  evidence: string[];
+  fix: string;
   suggested_patch?: string;
 };
 
-export type Review = { map: string; findings: Finding[]; skipped: string[] };
+export type Change = { area: string; change: string };
 
-export type Result = Review & { alias: string; cost_usd: number; seconds: number; files: number };
+export type Review = { map: string; changes: Change[]; findings: Finding[]; skipped: string[] };
+
+export type Result = Review & { model: string; effort: string; cost_usd: number; seconds: number; files: number };
 
 export const reviewSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["map", "findings", "skipped"],
+  required: ["map", "changes", "findings", "skipped"],
   properties: {
     map: { type: "string" },
+    changes: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["area", "change"],
+        properties: { area: { type: "string" }, change: { type: "string" } },
+      },
+    },
     skipped: { type: "array", items: { type: "string" } },
     findings: {
       type: "array",
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["file", "line_start", "line_end", "severity", "title", "body"],
+        required: ["file", "line_start", "line_end", "severity", "title", "problem", "evidence", "fix"],
         properties: {
           file: { type: "string", description: "Path relative to the repo root" },
           line_start: { type: "integer" },
           line_end: { type: "integer" },
           severity: { type: "string", enum: ["P0", "P1", "P2", "P3"] },
-          title: { type: "string", description: "One line, under 80 characters" },
-          body: { type: "string", description: "One short paragraph: what is wrong, the evidence, the fix" },
+          title: { type: "string" },
+          problem: { type: "string" },
+          evidence: { type: "array", items: { type: "string" } },
+          fix: { type: "string" },
           suggested_patch: { type: "string", description: "Unified diff, only when the fix is small and complete" },
         },
       },
@@ -125,33 +140,97 @@ export function runReview(dir: string, pr: Pr, o: Options): Result {
   review.findings.sort((a, b) => a.severity.localeCompare(b.severity));
   return {
     ...review,
-    alias: o.model,
+    model: o.model,
+    effort: o.effort,
     cost_usd: out.total_cost_usd,
     seconds: Math.round((Date.now() - t0) / 1000),
     files: pr.files.length,
   };
 }
 
-export function render(pr: Pr, r: Result, minSeverity: Severity = "P3"): string {
-  const shown = r.findings.filter((f) => f.severity <= minSeverity);
-  const counts = (["P0", "P1", "P2", "P3"] as Severity[])
-    .map((s) => [s, shown.filter((f) => f.severity === s).length])
-    .filter(([, n]) => n)
-    .map(([s, n]) => `${n} ${s}`)
-    .join(", ");
+const CODE_REF = /`([\w@./-]+\.[A-Za-z0-9]+):(\d+)(?:-(\d+))?`/g;
+
+export const linkify = (pr: Pr, text: string) =>
+  text.replace(CODE_REF, (m, file, a, b) => `[${m}](${permalink(pr, file, Number(a), Number(b ?? a))})`);
+
+export const shownFindings = (r: Result, minSeverity: Severity) => r.findings.filter((f) => f.severity <= minSeverity);
+
+const LEGEND = "<sub>P0 data loss or security. P1 wrong behavior. P2 needs a maintainer decision. P3 minor.</sub>";
+
+export function verdict(shown: Finding[]): string {
+  if (shown.some((f) => f.severity <= "P1")) return "> [!CAUTION]\n> **Needs changes.**";
+  if (shown.length) return "> [!WARNING]\n> **Minor issues.**";
+  return "> [!TIP]\n> **Looks good.**";
+}
+
+// Overview: verdict, findings table, collapsed walkthrough. Used as the review body and the inbox header.
+export function overview(pr: Pr, r: Result, shown: Finding[]): string {
+  const n = shown.length;
   const out = [
-    "## rsrobo review",
-    shown.length ? `**${shown.length} finding${shown.length === 1 ? "" : "s"}** (${counts})` : "No findings.",
+    `${verdict(shown)} ${n === 0 ? "No findings" : `${n} finding${n === 1 ? "" : "s"}`} in ${r.files} files. \`${r.model}\` at ${r.effort} effort, $${r.cost_usd.toFixed(2)}, ${Math.round(r.seconds / 60)} min.`,
   ];
-  for (const f of shown) {
+  if (n) {
     out.push(
-      `### ${f.severity} · ${f.title}\n[\`${f.file}:${f.line_start}-${f.line_end}\`](${permalink(pr, f.file, f.line_start, f.line_end)})\n\n${f.body}`,
+      table(
+        ["Sev", "Where", "Finding"],
+        shown.map((f) => [f.severity, where(pr, f), f.title]),
+      ),
     );
-    if (f.suggested_patch) out.push(`\`\`\`diff\n${f.suggested_patch.trim()}\n\`\`\``);
+    out.push(LEGEND);
   }
-  const details = [`**Map.** ${r.map}`];
-  if (r.skipped.length) details.push(`**Skipped.** ${r.skipped.join("; ")}`);
-  out.push(`<details><summary>Details</summary>\n\n${details.join("\n\n")}\n\n</details>`);
-  out.push(`<sub>${r.alias} · $${r.cost_usd.toFixed(2)} · ${r.files} files · ${r.seconds}s</sub>`);
+  const walk = [linkify(pr, r.map)];
+  if (r.changes.length)
+    walk.push(
+      table(
+        ["Area", "Change"],
+        r.changes.map((c) => [`\`${c.area}\``, c.change]),
+      ),
+    );
+  if (r.skipped.length) walk.push(`Not reviewed: ${r.skipped.join("; ")}.`);
+  out.push(`<details><summary>Walkthrough</summary>\n\n${walk.join("\n\n")}\n\n</details>`);
   return out.join("\n\n");
 }
+
+// One finding as a comment body: title, problem, evidence bullets, fix, then collapsed patch and agent text.
+export function findingMd(pr: Pr, f: Finding, withWhere = true): string {
+  const out = [
+    `**${f.severity} ${f.title}**${withWhere ? ` at ${where(pr, f)}` : ""}`,
+    linkify(pr, f.problem),
+    f.evidence.map((e) => `- ${linkify(pr, e)}`).join("\n"),
+    `Fix: ${linkify(pr, f.fix)}`,
+  ];
+  if (f.suggested_patch) {
+    out.push(
+      `<details><summary>Suggested fix</summary>\n\n\`\`\`diff\n${f.suggested_patch.trim()}\n\`\`\`\n\n</details>`,
+    );
+  }
+  out.push(
+    `<details><summary>Copy-paste text for an agent</summary>\n\n\`\`\`text\n${agentText(pr, f)}\n\`\`\`\n\n</details>`,
+  );
+  return out.join("\n\n");
+}
+
+export function render(pr: Pr, r: Result, minSeverity: Severity = "P3"): string {
+  const shown = shownFindings(r, minSeverity);
+  return [overview(pr, r, shown), ...shown.map((f) => findingMd(pr, f))].join("\n\n---\n\n");
+}
+
+const agentText = (pr: Pr, f: Finding) =>
+  [
+    `Fix this defect in ${pr.owner}/${pr.repo} at commit ${pr.head}, file ${f.file} lines ${f.line_start}-${f.line_end}.`,
+    f.problem,
+    ...f.evidence,
+    `Fix: ${f.fix}`,
+    "Change only what the fix needs. Run the relevant tests.",
+  ].join("\n");
+
+const table = (head: string[], rows: string[][]) =>
+  [`| ${head.join(" | ")} |`, `|${head.map(() => "---").join("|")}|`, ...rows.map((r) => `| ${r.join(" | ")} |`)].join(
+    "\n",
+  );
+
+const where = (pr: Pr, f: Finding) => {
+  const name = f.file.split("/").pop();
+  const span = f.line_end > f.line_start ? `${f.line_start}-${f.line_end}` : `${f.line_start}`;
+  return `[${name}:${span}](${permalink(pr, f.file, f.line_start, f.line_end)})`;
+};

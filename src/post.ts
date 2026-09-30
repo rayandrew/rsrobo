@@ -1,9 +1,12 @@
 import { execFileSync } from "node:child_process";
 import { commentableLines, inDiff } from "./diff.ts";
 import type { Pr } from "./github.ts";
-import { type Finding, type Result, render } from "./review.ts";
+import { findingMd, overview, type Result, render, shownFindings } from "./review.ts";
 
-export type PostMode = "pending" | "inbox" | "comment";
+export type PostMode = "pending" | "review" | "inbox" | "comment";
+
+const AI_NOTE =
+  "<sub>AI-generated review, requested by a maintainer. Findings were verified against the code but can still be wrong.</sub>";
 
 const MARKER = (pr: Pr) => `<!-- rsrobo ${pr.owner}/${pr.repo}#${pr.number} -->`;
 
@@ -19,16 +22,23 @@ function gh(token: string, args: string[], input?: unknown): unknown {
   return out ? JSON.parse(out) : null;
 }
 
-// Pending review under my account: inline comments for findings inside the diff, the rest in the body.
-export function postPending(pr: Pr, r: Result, patch: string, token: string, minSeverity = "P3"): string {
+// Review on the PR: inline comments for findings inside the diff, the rest in the body.
+// `pending` under my token stays private until I submit it; `review` under the bot token is public at once.
+export function postReview(
+  pr: Pr,
+  r: Result,
+  patch: string,
+  token: string,
+  mode: "pending" | "review",
+  minSeverity = "P3",
+): string {
   const base = `repos/${pr.owner}/${pr.repo}/pulls/${pr.number}/reviews`;
-  const mine = (gh(token, [base]) as { id: number; state: string; user: { login: string } }[]).filter(
-    (v) => v.state === "PENDING",
-  );
-  for (const v of mine) gh(token, ["-X", "DELETE", `${base}/${v.id}`]);
-
+  if (mode === "pending") {
+    const mine = (gh(token, [base]) as { id: number; state: string }[]).filter((v) => v.state === "PENDING");
+    for (const v of mine) gh(token, ["-X", "DELETE", `${base}/${v.id}`]);
+  }
   const lines = commentableLines(patch);
-  const shown = r.findings.filter((f) => f.severity <= minSeverity);
+  const shown = shownFindings(r, minSeverity as "P0" | "P1" | "P2" | "P3");
   const inline = shown.filter((f) => inDiff(lines, f.file, f.line_start, f.line_end));
   const rest = shown.filter((f) => !inline.includes(f));
   const comments = inline.map((f) => ({
@@ -36,10 +46,13 @@ export function postPending(pr: Pr, r: Result, patch: string, token: string, min
     line: f.line_end,
     side: "RIGHT",
     ...(f.line_end > f.line_start ? { start_line: f.line_start, start_side: "RIGHT" } : {}),
-    body: findingBody(f),
+    body: findingMd(pr, f, false),
   }));
-  const body = render(pr, { ...r, findings: rest });
-  const res = gh(token, ["-X", "POST", base], { commit_id: pr.head, body, comments }) as { html_url: string };
+  const parts = [overview(pr, r, shown), ...rest.map((f) => findingMd(pr, f))];
+  if (mode === "review") parts.push(AI_NOTE);
+  const body = parts.join("\n\n---\n\n");
+  const req = { commit_id: pr.head, body, comments, ...(mode === "review" ? { event: "COMMENT" } : {}) };
+  const res = gh(token, ["-X", "POST", base], req) as { html_url: string };
   return res.html_url;
 }
 
@@ -67,7 +80,7 @@ export function postInbox(pr: Pr, r: Result, token: string, inboxRepo: string): 
 // One sticky public comment as the bot, edited in place.
 export function postComment(pr: Pr, r: Result, token: string, botLogin: string): string {
   const base = `repos/${pr.owner}/${pr.repo}/issues/${pr.number}/comments`;
-  const body = `${MARKER(pr)}\n${render(pr, r)}\n\n<sub>AI-generated review, requested by the PR reviewer.</sub>`;
+  const body = `${MARKER(pr)}\n${render(pr, r)}\n\n${AI_NOTE}`;
   const all = gh(token, ["--paginate", base]) as {
     id: number;
     body: string;
@@ -81,9 +94,4 @@ export function postComment(pr: Pr, r: Result, token: string, botLogin: string):
   }
   const res = gh(token, ["-X", "POST", base], { body }) as { html_url: string };
   return res.html_url;
-}
-
-function findingBody(f: Finding): string {
-  const patch = f.suggested_patch ? `\n\n\`\`\`diff\n${f.suggested_patch.trim()}\n\`\`\`` : "";
-  return `**${f.severity} · ${f.title}**\n\n${f.body}${patch}`;
 }

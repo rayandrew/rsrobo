@@ -5,13 +5,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { checkout, fetchPr } from "./github.ts";
-import { type PostMode, postComment, postInbox, postPending } from "./post.ts";
+import { type PostMode, postComment, postInbox, postReview } from "./post.ts";
 import { prepare, render, runReview, type Severity } from "./review.ts";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const config = JSON.parse(readFileSync(join(root, "config.json"), "utf8"));
 const usage =
-  "usage: rsrobo review owner/repo#N [--model alias] [--verify alias] [--budget usd] [--effort high] [--focus a,b] [--min-severity P2] [--notes dir] [--skills dir] [--post pending|inbox|comment] [--json]";
+  "usage: rsrobo review owner/repo#N [--model alias] [--verify alias] [--budget usd] [--effort high] [--focus a,b] [--min-severity P2] [--notes dir] [--skills dir] [--post pending|review|inbox|comment] [--json]";
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -49,7 +49,6 @@ const result = runReview(dir, pr, {
   skillsDir: values.skills,
   promptsDir: join(root, "prompts"),
 });
-result.alias = modelAlias;
 writeFileSync(join(dir, ".rsrobo", "review.json"), JSON.stringify(result, null, 2));
 const minSeverity = values["min-severity"] as Severity;
 
@@ -57,10 +56,10 @@ const minSeverity = values["min-severity"] as Severity;
 if (values.post) {
   const userToken = process.env.GH_TOKEN ?? execFileSync("gh", ["auth", "token"], { encoding: "utf8" }).trim();
   const url = {
-    pending: () =>
-      postPending(pr, result, readFileSync(join(dir, ".rsrobo", "diff.patch"), "utf8"), userToken, minSeverity),
+    pending: () => postReview(pr, result, patch(), userToken, "pending", minSeverity),
+    review: () => postReview(pr, result, patch(), botToken(), "review", minSeverity),
     inbox: () => postInbox(pr, result, userToken, config.inbox_repo),
-    comment: () => postComment(pr, result, process.env.BOT_TOKEN ?? fail("BOT_TOKEN is not set"), config.bot_login),
+    comment: () => postComment(pr, result, botToken(), config.bot_login),
   }[values.post as PostMode];
   if (!url) fail(usage);
   console.log(`${url()}\n${result.findings.length} findings, $${result.cost_usd.toFixed(2)}, ${result.seconds}s`);
@@ -68,6 +67,12 @@ if (values.post) {
   console.log(values.json ? JSON.stringify(result, null, 2) : render(pr, result, minSeverity));
 }
 
+function patch() {
+  return readFileSync(join(dir, ".rsrobo", "diff.patch"), "utf8");
+}
+function botToken() {
+  return process.env.BOT_TOKEN ?? fail("BOT_TOKEN is not set");
+}
 function fail(msg: string): never {
   console.error(msg);
   process.exit(1);

@@ -31,4 +31,18 @@ If you are not certain a finding is real, leave it out. A false report costs mor
 
 Severity: P0 data loss or security. P1 wrong behavior. P2 needs a maintainer decision. P3 minor.
 
-In `map`, write two or three lines: what the PR changes and which files to read first. In `skipped`, list only files you did not read, one entry per file with the reason. Do not mention budget or process there.
+<style>
+Write in Simplified Technical English.
+One sentence per line. At most 20 words per sentence. Active voice, present tense.
+No headings, no lists, no bold inside any field. The tool adds structure.
+Refer to code as `path:line` or `path:line-line` in backticks, for example `src/io/reader.cpp:120-124`. The tool turns these into links.
+</style>
+
+`title`: one line, under 70 characters, names the defect, not the fix.
+`problem`: one or two lines. What is wrong and its effect.
+`evidence`: two to five items. Each starts with a code reference, then one clause that says what that code does.
+`fix`: one line.
+`suggested_patch`: only when the fix is small and complete on its own.
+`map`: two to four lines. What the PR changes. Which files to read first.
+`changes`: up to 15 rows. `area` is a file or a directory group. `change` is one clause.
+`skipped`: only files you did not read, one entry per file with the reason.

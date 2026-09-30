@@ -16,6 +16,6 @@
   "default_model": "sonnet",
   "verify_model": "sonnet",
   "repos": {
-    "llnl-asr/*": { "post": "inbox" }
+    "llnl-asr/*": { "post": "pending" }
   }
 }

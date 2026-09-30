@@ -4,7 +4,7 @@ on:
     inputs:
       repo: { description: "owner/name", required: true }
       pr: { description: "PR number", required: true }
-      post: { description: "pending | inbox | comment", default: "inbox" }
+      post: { description: "pending | review | inbox | comment", default: "pending" }
       model: { description: "model alias", default: "sonnet" }
       budget: { description: "USD cap", default: "3" }
       focus: { description: "focus areas", default: "" }
