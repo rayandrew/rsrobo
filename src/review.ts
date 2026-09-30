@@ -87,7 +87,9 @@ export type Options = {
 // The PR head must not configure the reviewer (prompt injection), so its own
 // CLAUDE.md, AGENTS.md and .claude/ are removed and the overlay from rsrobo-notes takes their place.
 export function prepare(dir: string, pr: Pr, notesDir?: string) {
-  for (const f of ["CLAUDE.md", "AGENTS.md", ".claude"]) rmSync(join(dir, f), { recursive: true, force: true });
+  for (const f of ["CLAUDE.md", "AGENTS.md", ".claude", ".pi", ".agents"]) {
+    rmSync(join(dir, f), { recursive: true, force: true });
+  }
   const overlay = notesDir && join(notesDir, pr.owner, pr.repo);
   if (overlay && existsSync(overlay)) cpSync(overlay, dir, { recursive: true });
 }

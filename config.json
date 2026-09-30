@@ -11,8 +11,13 @@
   "models": {
     "haiku": "claude-haiku-4-5-20251001",
     "sonnet": "claude-sonnet-5-5",
-    "opus": "claude-opus-5-5"
+    "opus": "claude-opus-5-5",
+    "luna": { "engine": "pi", "provider": "openai-codex", "model": "gpt-6-luna" },
+    "sol": { "engine": "pi", "provider": "openai-codex", "model": "gpt-6-sol" },
+    "kimi": { "engine": "pi", "provider": "freeinference", "model": "kimi-k2.7-code" },
+    "or-sonnet": { "engine": "pi", "provider": "openrouter", "model": "anthropic/claude-sonnet-5.5" }
   },
+  "pi_providers": ["openai-codex", "openrouter", "freeinference"],
   "default_model": "sonnet",
   "verify_model": "sonnet",
   "commit_trailer": "Assisted-by: rsrobo",

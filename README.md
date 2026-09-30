@@ -45,3 +45,9 @@ Command grammar:
 - Requesting a review from the bot on the PR page starts a default review. Own repos only; the bot must be a collaborator.
 
 Failed CI checks on the PR head are fetched read-only and handed to the reviewer as `.rsrobo/ci.md`.
+
+## Engines
+
+`model=` takes an alias from `config.json`, or `provider/model` for any provider in `pi_providers`. A string alias runs on Claude Code (`claude -p`, subscription token). An object alias or a `provider/model` runs on [pi](https://pi.dev) with that provider: `model=luna`, `model=openrouter/anthropic/claude-sonnet-5.5`, `model=freeinference/kimi-k2.7-code`. Both engines use the same prompts, the verify subagent and the kb tools. pi has no cost cap; a 40 minute timeout stands in.
+
+CI auth for pi: `OPENROUTER_API_KEY` as a secret. For a Codex subscription, put the `openai-codex` entry of `~/.pi/agent/auth.json` into the `PI_AUTH_JSON` secret; the job writes it back. Refresh tokens rotate, so that secret can go stale.

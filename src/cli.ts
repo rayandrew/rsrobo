@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { ciReport } from "./ci.ts";
 import { compareMd } from "./compare.ts";
+import { runReviewPi } from "./engine-pi.ts";
 import {
   deliverCommit,
   fixMd,
@@ -59,8 +60,24 @@ const { values, positionals } = parseArgs({
 });
 
 const [task, target] = positionals;
-const alias = (name: string) =>
-  config.models[name] ?? fail(`unknown model alias "${name}"; known: ${Object.keys(config.models).join(", ")}`);
+// An alias is a Claude model id string, or `{ engine: "pi", provider, model }` for the pi engine.
+type Engine = { engine: "claude"; model: string } | { engine: "pi"; provider: string; model: string };
+// Besides aliases, `provider/model` is accepted for the providers in `pi_providers`, so any model pi knows works.
+const resolve = (name: string): Engine => {
+  const m = config.models[name];
+  if (typeof m === "string") return { engine: "claude", model: m };
+  if (m) return { engine: "pi", ...m };
+  const pm = /^([\w-]+)\/(.+)$/.exec(name);
+  if (pm && (config.pi_providers as string[]).includes(pm[1])) return { engine: "pi", provider: pm[1], model: pm[2] };
+  return fail(
+    `unknown model "${name}"; aliases: ${Object.keys(config.models).join(", ")}; or provider/model with provider in ${config.pi_providers.join(", ")}`,
+  );
+};
+const alias = (name: string): string => {
+  const e = resolve(name);
+  if (e.engine !== "claude") fail(`alias "${name}" runs on pi; this task needs a Claude alias`);
+  return e.model;
+};
 
 // init-notes: draft <notes>/<owner>/<repo>/CLAUDE.md from the default branch. Never overwrites without --force.
 if (task === "init-notes") {
@@ -205,16 +222,26 @@ try {
 } catch (e) {
   console.error(`ci: ${(e as Error).message.split("\n")[0]}`);
 }
-const result = runReview(dir, pr, {
-  model: alias(modelAlias),
-  verifyModel: alias(values.verify ?? modelAlias),
+const engine = resolve(modelAlias);
+const verifyEngine = resolve(values.verify ?? modelAlias);
+const common = {
   budgetUsd: Math.min(Number(values.budget), config.max_budget_usd),
   effort: values.effort ?? "high",
   focus: values.focus,
   skillsDir: values.skills,
   kbDir: values.kb,
   promptsDir: join(root, "prompts"),
-});
+};
+const result =
+  engine.engine === "pi"
+    ? runReviewPi(dir, pr, {
+        ...common,
+        model: engine.model,
+        verifyModel: engine.model,
+        pi: engine,
+        verifyPi: verifyEngine.engine === "pi" ? verifyEngine : engine,
+      })
+    : runReview(dir, pr, { ...common, model: engine.model, verifyModel: alias(values.verify ?? modelAlias) });
 writeFileSync(join(dir, ".rsrobo", "review.json"), JSON.stringify(result, null, 2));
 const minSeverity = values["min-severity"] as Severity;
 
