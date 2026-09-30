@@ -56,3 +56,14 @@ export function checkout(pr: Pr, workRoot: string): string {
 
 export const permalink = (pr: Pr, file: string, from: number, to: number) =>
   `https://github.com/${pr.owner}/${pr.repo}/blob/${pr.head}/${file}#L${from}-L${to}`;
+
+// Shallow clone of the default branch, for init-notes.
+export function cloneDefault(owner: string, repo: string, workRoot: string): string {
+  const dir = join(workRoot, `${owner}__${repo}__default`);
+  if (existsSync(dir)) execFileSync("git", ["-C", dir, "pull", "-q", "--ff-only"]);
+  else {
+    mkdirSync(dirname(dir), { recursive: true });
+    execFileSync("git", ["clone", "-q", "--depth", "1", `https://github.com/${owner}/${repo}.git`, dir]);
+  }
+  return dir;
+}

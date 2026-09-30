@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 import { execFileSync, spawn } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { ciReport } from "./ci.ts";
 import { compareMd } from "./compare.ts";
 import { fixMd, loadFindings, patchApplies, pick, runFix, type Suggestion, suggestions, type Via } from "./fix.ts";
-import { checkout, fetchPr } from "./github.ts";
+import { checkout, cloneDefault, fetchPr } from "./github.ts";
 import { pruneKb, type Sensitivity } from "./kb.ts";
 import {
   commentInbox,
@@ -17,12 +18,12 @@ import {
   postReview,
   postSuggestions,
 } from "./post.ts";
-import { prepare, render, runReview, type Severity, saveReview } from "./review.ts";
+import { initNotes, prepare, render, runReview, type Severity, saveReview } from "./review.ts";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const config = JSON.parse(readFileSync(join(root, "config.json"), "utf8"));
 const usage =
-  "usage: rsrobo review owner/repo#N [--model alias] [--verify alias] [--budget usd] [--effort high] [--focus a,b] [--min-severity P2] [--notes dir] [--skills dir] [--post pending|review|inbox|comment] [--save dir] [--kb dir] [--json]\n       rsrobo compare owner/repo#N --models a,b [--effort high] [--budget usd] [--kb dir]\n       rsrobo fix owner/repo#N 2,3|all [--via patch|suggest] [--model alias] [--post]";
+  "usage: rsrobo review owner/repo#N [--model alias] [--verify alias] [--budget usd] [--effort high] [--focus a,b] [--min-severity P2] [--notes dir] [--skills dir] [--post pending|review|inbox|comment] [--save dir] [--kb dir] [--json]\n       rsrobo compare owner/repo#N --models a,b [--effort high] [--budget usd] [--kb dir]\n       rsrobo fix owner/repo#N 2,3|all [--via patch|suggest] [--model alias] [--post]\n       rsrobo init-notes owner/repo [--notes dir] [--force]";
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -41,11 +42,35 @@ const { values, positionals } = parseArgs({
     json: { type: "boolean", default: false },
     models: { type: "string" },
     via: { type: "string", default: "patch" },
+    force: { type: "boolean", default: false },
     work: { type: "string", default: process.env.RSROBO_WORK_DIR ?? join(root, ".work") },
   },
 });
 
 const [task, target] = positionals;
+const alias = (name: string) =>
+  config.models[name] ?? fail(`unknown model alias "${name}"; known: ${Object.keys(config.models).join(", ")}`);
+
+// init-notes: draft <notes>/<owner>/<repo>/CLAUDE.md from the default branch. Never overwrites without --force.
+if (task === "init-notes") {
+  const rm = target ? /^([\w.-]+)\/([\w.-]+)$/.exec(target) : null;
+  if (!rm) fail(usage);
+  const [, owner, repo] = rm;
+  const dir = cloneDefault(owner, repo, values.work);
+  const { md, cost_usd } = initNotes(dir, {
+    model: alias(values.model ?? fail(usage)),
+    budgetUsd: Math.min(Number(values.budget), config.max_budget_usd),
+    promptsDir: join(root, "prompts"),
+  });
+  if (values.notes) {
+    const out = join(values.notes, owner, repo, "CLAUDE.md");
+    if (existsSync(out) && !values.force) fail(`${out} exists; pass --force to overwrite`);
+    mkdirSync(dirname(out), { recursive: true });
+    writeFileSync(out, md);
+    console.log(`${out}\n$${cost_usd.toFixed(2)}`);
+  } else console.log(md);
+  process.exit(0);
+}
 const m =
   ["review", "compare", "fix"].includes(task ?? "") && target ? /^([\w.-]+)\/([\w.-]+)#(\d+)$/.exec(target) : null;
 if (!m) fail(usage);
@@ -79,8 +104,6 @@ if (task === "compare") {
   process.exit(0);
 }
 const modelAlias = values.model ?? fail(usage);
-const alias = (name: string) =>
-  config.models[name] ?? fail(`unknown model alias "${name}"; known: ${Object.keys(config.models).join(", ")}`);
 
 const pr = fetchPr(owner, repo, Number(number));
 
@@ -145,6 +168,11 @@ if (values.kb) {
 }
 const dir = checkout(pr, values.work);
 prepare(dir, pr, values.notes);
+try {
+  writeFileSync(join(dir, ".rsrobo", "ci.md"), ciReport(pr));
+} catch (e) {
+  console.error(`ci: ${(e as Error).message.split("\n")[0]}`);
+}
 const result = runReview(dir, pr, {
   model: alias(modelAlias),
   verifyModel: alias(values.verify ?? modelAlias),

@@ -102,7 +102,7 @@ export function buildPrompt(pr: Pr, o: Options): string {
     `<body>\n${pr.body}\n</body>`,
     `<changed_files count="${pr.files.length}">\n${files}\n</changed_files>`,
     `</pr>`,
-    `The full diff is in \`.rsrobo/diff.patch\`.`,
+    `The full diff is in \`.rsrobo/diff.patch\`. Failed CI checks, when any, are in \`.rsrobo/ci.md\`; a failure the PR causes is a finding.`,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -266,4 +266,41 @@ export function saveReview(
   writeFileSync(file, `${pr.html_url} at ${pr.head}\n\n${render(pr, r, minSeverity)}\n`);
   writeFileSync(join(dir, `${name}.json`), JSON.stringify({ pr: pr.html_url, head: pr.head, ...r }, null, 2));
   return file;
+}
+
+// Drafts the notes CLAUDE.md for a repository from its default-branch checkout. Read-only run; returns the markdown.
+export function initNotes(
+  dir: string,
+  o: { model: string; budgetUsd: number; promptsDir: string },
+): { md: string; cost_usd: number } {
+  const r = spawnSync(
+    "claude",
+    [
+      "-p",
+      "--output-format",
+      "json",
+      "--no-session-persistence",
+      "--setting-sources",
+      "project",
+      "--tools",
+      "Read,Grep,Glob",
+      "--permission-prompts",
+      "none",
+      "--model",
+      o.model,
+      "--effort",
+      "high",
+      "--max-budget-usd",
+      String(o.budgetUsd),
+      readFileSync(join(o.promptsDir, "init-notes.md"), "utf8"),
+    ],
+    { cwd: dir, encoding: "utf8", maxBuffer: 64 << 20 },
+  );
+  if (r.status !== 0) throw new Error(`claude exited ${r.status}: ${r.stderr}`);
+  const out = JSON.parse(r.stdout);
+  if (out.is_error) throw new Error(`init-notes failed: ${out.result}`);
+  const md = String(out.result)
+    .replace(/^```(?:markdown)?\n([\s\S]*?)\n```\s*$/, "$1")
+    .trim();
+  return { md: `${md}\n`, cost_usd: out.total_cost_usd };
 }
