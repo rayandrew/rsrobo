@@ -8,6 +8,7 @@ on:
       model: { description: "model alias", default: "sonnet" }
       budget: { description: "USD cap", default: "3" }
       focus: { description: "focus areas", default: "" }
+      effort: { description: "low | medium | high", default: "high" }
 concurrency:
   group: review-${{ inputs.repo }}-${{ inputs.pr }}
   cancel-in-progress: true
@@ -27,7 +28,7 @@ jobs:
         with: { node-version: 26, cache: npm }
       - run: npm ci
       - run: npm i -g @anthropic-ai/claude-code
-      - run: node src/cli.ts review "$REPO#$PR" --post "$POST" --model "$MODEL" --budget "$BUDGET" ${FOCUS:+--focus "$FOCUS"}
+      - run: node src/cli.ts review "$REPO#$PR" --post "$POST" --model "$MODEL" --budget "$BUDGET" --effort "$EFFORT" ${FOCUS:+--focus "$FOCUS"}
         env:
           REPO: ${{ inputs.repo }}
           PR: ${{ inputs.pr }}
@@ -35,6 +36,7 @@ jobs:
           MODEL: ${{ inputs.model }}
           BUDGET: ${{ inputs.budget }}
           FOCUS: ${{ inputs.focus }}
+          EFFORT: ${{ inputs.effort }}
           GH_TOKEN: ${{ secrets.USER_TOKEN }}
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

@@ -1,0 +1,111 @@
+import { parseCommand } from "../../src/commands.ts";
+
+type Env = {
+  SEEN: KVNamespace;
+  BOT_TOKEN: string;
+  USER_TOKEN: string;
+  BOT_LOGIN: string;
+  HUB_REPO: string;
+  HUB_REF: string;
+  INBOX_REPO: string;
+  ALLOWED_COMMENTERS: string;
+  ALLOWED_REPOS: string;
+};
+
+type Notification = {
+  id: string;
+  reason: string;
+  updated_at: string;
+  subject: { type: string; url: string; latest_comment_url: string | null };
+  repository: { full_name: string };
+};
+
+type Comment = { id: number; body: string; html_url: string; user: { login: string } };
+
+const SEEN_TTL = 60 * 60 * 24 * 30;
+
+export default {
+  async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(poll(env));
+  },
+};
+
+async function poll(env: Env) {
+  const notes = (await gh(env.BOT_TOKEN, "/notifications?participating=true")) as Notification[];
+  for (const n of notes) {
+    if (n.reason !== "mention" || n.subject.type !== "PullRequest") continue;
+    const comment = await findMention(env, n);
+    if (comment && !(await env.SEEN.get(`comment:${comment.id}`))) {
+      await handle(env, n, comment);
+      await env.SEEN.put(`comment:${comment.id}`, "1", { expirationTtl: SEEN_TTL });
+    }
+    await gh(env.BOT_TOKEN, `/notifications/threads/${n.id}`, "PATCH");
+  }
+}
+
+// The latest comment is usually the mention. If not, look at comments since the thread changed.
+async function findMention(env: Env, n: Notification): Promise<Comment | null> {
+  const mention = new RegExp(`@${env.BOT_LOGIN}\\b`, "i");
+  if (n.subject.latest_comment_url) {
+    const c = (await gh(env.BOT_TOKEN, n.subject.latest_comment_url)) as Comment;
+    if (mention.test(c.body)) return c;
+  }
+  const since = new Date(Date.parse(n.updated_at) - 10 * 60 * 1000).toISOString();
+  const prUrl = n.subject.url.replace("/pulls/", "/issues/");
+  const recent = (await gh(env.BOT_TOKEN, `${prUrl}/comments?since=${since}`)) as Comment[];
+  return recent.reverse().find((c) => mention.test(c.body)) ?? null;
+}
+
+async function handle(env: Env, n: Notification, c: Comment) {
+  const repo = n.repository.full_name;
+  const pr = n.subject.url.split("/").pop();
+  if (!env.ALLOWED_COMMENTERS.split(",").includes(c.user.login)) return;
+  if (!env.ALLOWED_REPOS.split(",").some((g) => glob(g, repo))) return;
+
+  let spec: ReturnType<typeof parseCommand>;
+  try {
+    spec = parseCommand(c.body, env.BOT_LOGIN);
+  } catch (e) {
+    await inbox(env, `rsrobo: bad command on ${repo}#${pr}`, `${c.html_url}\n\n${(e as Error).message}`);
+    return;
+  }
+  if (!spec) return;
+  if (spec.task !== "review") {
+    await inbox(
+      env,
+      `rsrobo: unsupported task on ${repo}#${pr}`,
+      `${c.html_url}\n\n\`${spec.task}\` is not implemented yet.`,
+    );
+    return;
+  }
+  const inputs: Record<string, string> = { repo, pr: String(pr) };
+  for (const k of ["post", "model", "budget", "focus", "effort"]) if (spec.args[k]) inputs[k] = spec.args[k];
+  if (spec.text) inputs.focus = [inputs.focus, spec.text].filter(Boolean).join("; ");
+  await gh(env.USER_TOKEN, `/repos/${env.HUB_REPO}/actions/workflows/review.yml/dispatches`, "POST", {
+    ref: env.HUB_REF,
+    inputs,
+  });
+}
+
+async function inbox(env: Env, title: string, body: string) {
+  await gh(env.USER_TOKEN, `/repos/${env.INBOX_REPO}/issues`, "POST", { title, body, labels: ["rsrobo"] });
+}
+
+async function gh(token: string, path: string, method = "GET", body?: unknown): Promise<unknown> {
+  const url = path.startsWith("https://") ? path : `https://api.github.com${path}`;
+  const res = await fetch(url, {
+    method,
+    headers: {
+      authorization: `token ${token}`,
+      accept: "application/vnd.github+json",
+      "user-agent": "rsrobo-poller",
+      ...(body ? { "content-type": "application/json" } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) throw new Error(`${method} ${path}: ${res.status} ${await res.text()}`);
+  return res.status === 204 || res.status === 205 ? null : res.json();
+}
+
+const glob = (pattern: string, s: string) =>
+  new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*")}$`).test(s);

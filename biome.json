@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
-  "files": { "includes": ["src/**", "tests/**", "*.json"] },
+  "files": { "includes": ["src/**", "tests/**", "poller/src/**", "*.json"] },
   "formatter": { "indentStyle": "space", "lineWidth": 120 },
   "linter": { "rules": { "preset": "recommended" } },
   "javascript": { "formatter": { "quoteStyle": "double" } }

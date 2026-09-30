@@ -1,0 +1,20 @@
+name = "rsrobo-poller"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+
+[triggers]
+crons = ["* * * * *"]
+
+[[kv_namespaces]]
+binding = "SEEN"
+id = "60bba7a0593c44e19bb08944c8747d69"
+
+[vars]
+BOT_LOGIN = "rsrobo"
+HUB_REPO = "rayandrew/rsrobo"
+HUB_REF = "trunk"
+INBOX_REPO = "rayandrew/rsrobo-notes"
+ALLOWED_COMMENTERS = "rayandrew"
+ALLOWED_REPOS = "rayandrew/*,llnl-asr/*"
+
+# secrets, set with `wrangler secret put`: BOT_TOKEN, USER_TOKEN

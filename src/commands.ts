@@ -4,7 +4,18 @@ export type TaskSpec = {
   text: string;
 };
 
-export const KNOWN_KEYS = new Set(["model", "focus", "files", "ignore", "budget", "post", "via", "platform", "tests"]);
+export const KNOWN_KEYS = new Set([
+  "model",
+  "focus",
+  "files",
+  "ignore",
+  "budget",
+  "post",
+  "via",
+  "platform",
+  "tests",
+  "effort",
+]);
 const TASKS = new Set([
   "review",
   "fix",
