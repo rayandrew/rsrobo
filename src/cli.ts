@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -144,7 +144,7 @@ const alias = (name: string): string => {
   return e.model;
 };
 
-// init-notes: draft <notes>/<owner>/<repo>/AGENTS.md (plus a CLAUDE.md that imports it) from the default branch. Never overwrites without --force.
+// init-notes: draft <notes>/<owner>/<repo>/AGENTS.md from the default branch. Never overwrites without --force.
 // ask: answer a question about the default branch; --issue N posts the answer there as the bot and copies it to the inbox.
 if (task === "ask" || task === "summarize" || task === "triage") {
   const rm = target ? /^([\w.-]+)\/([\w.-]+)$/.exec(target) : null;
@@ -227,15 +227,14 @@ if (task === "init-notes") {
     promptsDir: join(root, "prompts"),
   });
   if (values.notes) {
-    // AGENTS.md is the notes file every engine reads; CLAUDE.md is a one-line import of it for Claude Code.
+    // AGENTS.md is the notes file: pi and Codex read it, and Claude Code reads it when no CLAUDE.md exists.
     const out = join(values.notes, owner, repo, "AGENTS.md");
-    const shim = join(values.notes, owner, repo, "CLAUDE.md");
-    const old = existsSync(shim) && !/^@AGENTS\.md\s*$/.test(readFileSync(shim, "utf8"));
-    if ((existsSync(out) || old) && !values.force)
-      fail(`${existsSync(out) ? out : shim} exists; pass --force to overwrite`);
+    const legacy = join(values.notes, owner, repo, "CLAUDE.md");
+    const taken = [out, legacy].find((f) => existsSync(f));
+    if (taken && !values.force) fail(`${taken} exists; pass --force to overwrite`);
     mkdirSync(dirname(out), { recursive: true });
     writeFileSync(out, md);
-    writeFileSync(shim, "@AGENTS.md\n");
+    rmSync(legacy, { force: true });
     console.log(`${out}\n$${cost_usd.toFixed(2)}`);
   } else console.log(md);
   process.exit(0);
