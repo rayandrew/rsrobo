@@ -82,6 +82,48 @@ function people(owner: string, repo: string, number: number): People {
   };
 }
 
+export type Said = { who: string; when: string; where?: string; body: string };
+
+// What people wrote on the PR, oldest first, for .rsrobo/conversation.md. The bot's own text and commands to it
+// are left out. Only an owner (an allowed commenter) can close a finding, so each entry carries its role.
+export function conversationMd(said: Said[], owners: string[], botLogin: string): string {
+  const out = said
+    .filter((s) => s.body.trim() && s.who !== botLogin && !s.who.endsWith("[bot]"))
+    .filter((s) => !new RegExp(`^\\s*@${botLogin}\\b`, "i").test(s.body))
+    .sort((a, b) => a.when.localeCompare(b.when))
+    .map(
+      (s) =>
+        `<comment by="${s.who}" role="${owners.includes(s.who) ? "owner" : "other"}"${s.where ? ` at="${s.where}"` : ""}>\n${s.body.trim().slice(0, 2000)}\n</comment>`,
+    );
+  // ponytail: keeps the newest comments that fit in 30k characters; summarize older ones if long threads matter.
+  while (out.join("\n").length > 30_000) out.shift();
+  return out.join("\n");
+}
+
+export function conversation(pr: Pr, owners: string[], botLogin: string): string {
+  const base = `repos/${pr.owner}/${pr.repo}`;
+  type Raw = {
+    user: { login: string } | null;
+    body: string | null;
+    created_at?: string;
+    submitted_at?: string;
+    path?: string;
+    line?: number | null;
+  };
+  const get = (path: string) => JSON.parse(gh(["--paginate", "--slurp", path])).flat() as Raw[];
+  const said = [
+    ...get(`${base}/issues/${pr.number}/comments?per_page=100`),
+    ...get(`${base}/pulls/${pr.number}/reviews?per_page=100`),
+    ...get(`${base}/pulls/${pr.number}/comments?per_page=100`),
+  ].map((c) => ({
+    who: c.user?.login ?? "ghost",
+    when: c.created_at ?? c.submitted_at ?? "",
+    where: c.path ? `${c.path}${c.line ? `:${c.line}` : ""}` : undefined,
+    body: c.body ?? "",
+  }));
+  return conversationMd(said, owners, botLogin);
+}
+
 // Clones once per PR under workRoot, checks out the head, writes the diff to .rsrobo/diff.patch.
 export function checkout(pr: Pr, workRoot: string): string {
   const dir = join(workRoot, `${pr.owner}__${pr.repo}__${pr.number}`);

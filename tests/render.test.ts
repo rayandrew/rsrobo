@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { Pr } from "../src/github.ts";
-import { blocking, mergePass, missedFiles, type Result, render, saveReview } from "../src/review.ts";
+import { conversationMd, type Pr } from "../src/github.ts";
+import { blocking, buildPrompt, mergePass, missedFiles, type Result, render, saveReview } from "../src/review.ts";
 
 const pr: Pr = {
   owner: "o",
@@ -254,4 +254,32 @@ test("a skipped source file gets a second pass; lock files and styling do not", 
   assert.deepEqual(merged.skipped, ["web/view.css: styling", "web/package-lock.json: skimmed"]);
   assert.equal(merged.findings.length, result.findings.length + 1);
   assert.equal(merged.cost_usd, result.cost_usd + 1);
+});
+
+test("an incremental re-review names the files that changed and replaces the full read", () => {
+  const o = { model: "m", verifyModel: "m", budgetUsd: 3, effort: "high", promptsDir: "prompts" };
+  const inc = buildPrompt(pr, { ...o, previous: { head: "c".repeat(40), findings: [], sinceFiles: ["a.ts", "b.ts"] } });
+  assert.match(inc, /incremental re-review, and it replaces steps 1 and 2/);
+  assert.match(inc, /in full, with the callers of what changed: a\.ts, b\.ts\./);
+  const whole = buildPrompt(pr, { ...o, previous: { head: "c".repeat(40), findings: [] } });
+  assert.doesNotMatch(whole, /incremental/);
+  assert.match(render(pr, { ...result, note: "Re-review of the 2 files" }), /\n\nRe-review of the 2 files\n\n/);
+});
+
+test("the conversation keeps people, marks owners, and drops the bot and commands to it", () => {
+  const md = conversationMd(
+    [
+      { who: "dev", when: "2", body: "this is intended", where: "a.ts:3" },
+      { who: "ray", when: "1", body: "not a bug, we want this" },
+      { who: "rsrobo", when: "3", body: "Needs changes" },
+      { who: "ray", when: "4", body: "@rsrobo review full" },
+      { who: "ci[bot]", when: "5", body: "build passed" },
+    ],
+    ["ray"],
+    "rsrobo",
+  );
+  assert.equal(
+    md,
+    '<comment by="ray" role="owner">\nnot a bug, we want this\n</comment>\n<comment by="dev" role="other" at="a.ts:3">\nthis is intended\n</comment>',
+  );
 });

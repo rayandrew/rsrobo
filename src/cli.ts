@@ -23,7 +23,7 @@ import {
   type Via,
 } from "./fix.ts";
 import { runGate } from "./gate.ts";
-import { checkout, cloneDefault, fetchPr } from "./github.ts";
+import { checkout, cloneDefault, conversation, fetchPr } from "./github.ts";
 import { pruneKb, type Sensitivity } from "./kb.ts";
 import { ledger, ledgerMd } from "./ledger.ts";
 import { addLessons, kbProject } from "./lessons.ts";
@@ -54,7 +54,7 @@ import {
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const config = JSON.parse(readFileSync(join(root, "config.json"), "utf8"));
 const usage = [
-  "usage: rsrobo review owner/repo#N [--model alias] [--verify alias] [--budget usd] [--effort high] [--focus a,b] [--min-severity P2] [--notes dir] [--skills dir] [--post pending|review|inbox|comment] [--save dir] [--kb dir] [--json]",
+  "usage: rsrobo review owner/repo#N [--model alias] [--verify alias] [--budget usd] [--effort high] [--focus a,b] [--full] [--min-severity P2] [--notes dir] [--skills dir] [--post pending|review|inbox|comment] [--save dir] [--kb dir] [--json]",
   "       rsrobo compare owner/repo#N --models a,b [--effort high] [--budget usd] [--kb dir]",
   "       rsrobo fix owner/repo#N 2,3|all [--via patch|suggest|stacked|push] [--model alias] [--post]",
   "       rsrobo publish owner/repo#N [--save notes]",
@@ -75,6 +75,7 @@ const { values, positionals } = parseArgs({
     budget: { type: "string", default: String(config.default_budget_usd) },
     effort: { type: "string", default: config.effort },
     focus: { type: "string" },
+    full: { type: "boolean" },
     "min-severity": { type: "string", default: config.min_severity },
     notes: { type: "string", default: process.env.RSROBO_NOTES_DIR },
     skills: { type: "string", default: process.env.RSROBO_SKILLS_DIR },
@@ -499,9 +500,15 @@ const engine = resolve(modelAlias);
 const verifyEngine = resolve(values.verify ?? modelAlias);
 for (const e of [engine, verifyEngine]) allowedEngine(e, owner, repo);
 // A re-review: load the last saved review of this PR, and write the diff since its head when there is one.
+// `full` as a flag or as a word after the command ("review full") reviews the whole PR again.
+const FULL = /(^|[;\s])full(?=$|[;\s])/;
+const full = values.full || FULL.test(values.focus ?? "");
+const focus = values.focus?.replace(FULL, "$1").replace(/^[;\s]+|[;\s]+$/g, "") || undefined;
 let previous: Previous | undefined;
+let saved: Result | undefined;
 try {
   const last = loadFindings(pr, values.save || undefined, dir);
+  saved = last;
   if (last.findings.every((f) => f.n === undefined)) {
     for (const [i, f] of last.findings.entries()) f.n = i + 1;
   }
@@ -515,9 +522,21 @@ try {
         maxBuffer: 256 << 20,
       }),
     );
+    if (!full)
+      previous.sinceFiles = execFileSync("git", ["-C", dir, "diff", "--name-only", `${previous.head}..${pr.head}`], {
+        encoding: "utf8",
+      })
+        .split("\n")
+        .filter(Boolean);
   }
 } catch {
   previous = undefined;
+  saved = undefined;
+}
+try {
+  writeFileSync(join(dir, ".rsrobo", "conversation.md"), conversation(pr, config.allowed_commenters, config.bot_login));
+} catch (e) {
+  console.error(`conversation.md: ${(e as Error).message.split("\n")[0]}`);
 }
 const common = {
   previous,
@@ -542,15 +561,23 @@ const run = (focus?: string): Result =>
         verifyPi: verifyEngine.engine === "pi" ? verifyEngine : engine,
       })
     : runReview(dir, pr, { ...common, focus, model: engine.model, verifyModel: alias(values.verify ?? modelAlias) });
-let result = run(values.focus);
+// No new commit since the last review: the saved result is used and no model runs, unless `full` asks for one.
+const reuse = !full && saved && previous?.head === pr.head;
+let result: Result = reuse && saved ? { ...saved, cost_usd: 0, seconds: 0 } : run(focus);
+if (reuse)
+  result.note =
+    "No new commit since the last review. This is the saved result; the model did not run. Use `full` to review again.";
+else if (previous?.sinceFiles)
+  result.note = `Re-review of the ${previous.sinceFiles.length} file${previous.sinceFiles.length === 1 ? "" : "s"} that changed since \`${previous.head.slice(0, 7)}\`. Use \`full\` to review the whole PR again.`;
+else delete result.note;
 // A model that lists a changed source file as skipped gets one more pass over those files only.
-const missed = missedFiles(pr, result.skipped);
+const missed = reuse ? [] : missedFiles(pr, result.skipped);
 if (missed.length) {
   console.error(`second pass: ${missed.length} source file(s) were skipped`);
   const only = `only these files, which an earlier pass did not read in full: ${missed.join(", ")}. Read each one from its first line to its last`;
   result = mergePass(result, run(only), missed);
 }
-reconcile(previous, result);
+if (!reuse) reconcile(previous, result);
 result.commit_issues = applySuggestions(commitIssues, result.commit_subjects, repoConfig?.commits?.types ?? []);
 if (values.requester) result.requester = values.requester;
 writeFileSync(join(dir, ".rsrobo", "review.json"), JSON.stringify(result, null, 2));
