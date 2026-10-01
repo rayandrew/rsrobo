@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { Pr } from "../src/github.ts";
-import { mergePass, missedFiles, type Result, render, saveReview } from "../src/review.ts";
+import { blocking, mergePass, missedFiles, type Result, render, saveReview } from "../src/review.ts";
 
 const pr: Pr = {
   owner: "o",
@@ -222,6 +222,8 @@ test("commit issues show in the overview and turn a clean review into needs chan
     md,
     /\| P1 \| \[bbbbbbb\]\(https:\/\/x\/c\) \| `Update LICENSE` \| not `type\(scope\): description` \| `docs: update the license` \|/,
   );
+  assert.equal(blocking([], withIssue.commit_issues), true);
+  assert.equal(blocking([result.findings[0]]), false);
   assert.match(md, /To fix: reword each commit with `git rebase -i`/);
   assert.match(
     md,

@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { commentableLines, inDiff } from "./diff.ts";
 import type { Pr } from "./github.ts";
-import { findingMd, overview, type Result, render, shownFindings } from "./review.ts";
+import { blocking, findingMd, overview, type Result, render, shownFindings } from "./review.ts";
 
 export type PostMode = "pending" | "review" | "inbox" | "comment";
 
@@ -51,9 +51,33 @@ export function postReview(
   const parts = [overview(pr, r, shown), ...rest.map((f) => findingMd(pr, f, true, f.n))];
   if (mode === "review") parts.push(AI_NOTE);
   const body = parts.join("\n\n---\n\n");
-  const req = { commit_id: pr.head, body, comments, ...(mode === "review" ? { event: "COMMENT" } : {}) };
-  const res = gh(token, ["-X", "POST", base], req) as { html_url: string };
-  return res.html_url;
+  const req = { commit_id: pr.head, body, comments };
+  if (mode === "pending") return (gh(token, ["-X", "POST", base], req) as { html_url: string }).html_url;
+  const post = (event: string) => (gh(token, ["-X", "POST", base], { ...req, event }) as { html_url: string }).html_url;
+  if (blocking(shown, r.commit_issues)) {
+    try {
+      return post("REQUEST_CHANGES");
+    } catch (e) {
+      // GitHub refuses a change request on a PR the bot opened itself.
+      console.error(`request changes refused, posting a comment review: ${(e as Error).message.split("\n")[0]}`);
+      return post("COMMENT");
+    }
+  }
+  const url = post("COMMENT");
+  // A comment review does not lift an earlier change request, so the bot dismisses its own. This needs write access.
+  try {
+    const me = (gh(token, ["user"]) as { login: string }).login;
+    const old = (
+      gh(token, [`${base}?per_page=100`]) as { id: number; state: string; user: { login: string } }[]
+    ).filter((v) => v.state === "CHANGES_REQUESTED" && v.user.login === me);
+    for (const v of old)
+      gh(token, ["-X", "PUT", `${base}/${v.id}/dismissals`], {
+        message: `Resolved at ${pr.head.slice(0, 7)}; see ${url}`,
+      });
+  } catch (e) {
+    console.error(`could not dismiss the earlier change request: ${(e as Error).message.split("\n")[0]}`);
+  }
+  return url;
 }
 
 // One open issue per PR in the private notes repo, body replaced on every run; closing it archives that PR.

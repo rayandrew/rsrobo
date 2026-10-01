@@ -248,9 +248,13 @@ export const shownFindings = (r: Result, minSeverity: Severity) => r.findings.fi
 
 const LEGEND = "<sub>P0 data loss or security. P1 wrong behavior. P2 needs a maintainer decision. P3 minor.</sub>";
 
+// P0 or P1, in a finding or a commit message: the verdict is "Needs changes" and a public review requests changes.
+export const blocking = (shown: Finding[], commitIssues: CommitIssue[] = []) =>
+  [...shown, ...commitIssues].some((x) => x.severity <= "P1");
+
 export function verdict(shown: Finding[], commitIssues: CommitIssue[] = []): string {
   const all = [...shown.map((f) => f.severity), ...commitIssues.map((c) => c.severity)];
-  if (all.some((s) => s <= "P1")) return "> [!CAUTION]\n> **Needs changes.**";
+  if (blocking(shown, commitIssues)) return "> [!CAUTION]\n> **Needs changes.**";
   if (all.length) return "> [!WARNING]\n> **Minor issues.**";
   return "> [!TIP]\n> **Looks good.**";
 }
