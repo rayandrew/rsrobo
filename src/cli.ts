@@ -144,7 +144,7 @@ const alias = (name: string): string => {
   return e.model;
 };
 
-// init-notes: draft <notes>/<owner>/<repo>/CLAUDE.md from the default branch. Never overwrites without --force.
+// init-notes: draft <notes>/<owner>/<repo>/AGENTS.md (plus a CLAUDE.md that imports it) from the default branch. Never overwrites without --force.
 // ask: answer a question about the default branch; --issue N posts the answer there as the bot and copies it to the inbox.
 if (task === "ask" || task === "summarize" || task === "triage") {
   const rm = target ? /^([\w.-]+)\/([\w.-]+)$/.exec(target) : null;
@@ -227,10 +227,15 @@ if (task === "init-notes") {
     promptsDir: join(root, "prompts"),
   });
   if (values.notes) {
-    const out = join(values.notes, owner, repo, "CLAUDE.md");
-    if (existsSync(out) && !values.force) fail(`${out} exists; pass --force to overwrite`);
+    // AGENTS.md is the notes file every engine reads; CLAUDE.md is a one-line import of it for Claude Code.
+    const out = join(values.notes, owner, repo, "AGENTS.md");
+    const shim = join(values.notes, owner, repo, "CLAUDE.md");
+    const old = existsSync(shim) && !/^@AGENTS\.md\s*$/.test(readFileSync(shim, "utf8"));
+    if ((existsSync(out) || old) && !values.force)
+      fail(`${existsSync(out) ? out : shim} exists; pass --force to overwrite`);
     mkdirSync(dirname(out), { recursive: true });
     writeFileSync(out, md);
+    writeFileSync(shim, "@AGENTS.md\n");
     console.log(`${out}\n$${cost_usd.toFixed(2)}`);
   } else console.log(md);
   process.exit(0);
@@ -389,7 +394,24 @@ if (task === "fix") {
     });
     const reset = () => {
       execFileSync("git", ["-C", dir, "checkout", "-q", "--", "."]);
-      execFileSync("git", ["-C", dir, "clean", "-qfd", "-e", ".rsrobo", "-e", "CLAUDE.md", "-e", ".claude"]);
+      execFileSync("git", [
+        "-C",
+        dir,
+        "clean",
+        "-qfd",
+        "-e",
+        ".rsrobo",
+        "-e",
+        "CLAUDE.md",
+        "-e",
+        "AGENTS.md",
+        "-e",
+        ".claude",
+        "-e",
+        ".pi",
+        "-e",
+        ".agents",
+      ]);
     };
     reset();
     const applies = patchApplies(dir, patch);

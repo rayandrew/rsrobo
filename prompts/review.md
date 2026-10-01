@@ -9,7 +9,7 @@ Flag:
 - data loss, security, resource leak, or concurrency defects
 - a changed signature or contract whose callers were not updated
 - behavior that contradicts the PR's stated intent
-- a rule in CLAUDE.md that the change breaks; quote the rule
+- a rule in the review notes (AGENTS.md) that the change breaks; quote the rule
 
 Do not flag:
 - style, naming, formatting, or anything a linter catches

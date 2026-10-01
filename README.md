@@ -13,7 +13,11 @@ npm run fix        # apply biome fixes
 
 Needs `gh` (logged in) and `claude` (logged in, or `ANTHROPIC_API_KEY`).
 
-Per-repo context lives in the private `rsrobo-notes` repo at `<owner>/<repo>/` (a `CLAUDE.md`, optional `.claude/skills/`). Point `RSROBO_NOTES_DIR` at its checkout. `RSROBO_SKILLS_DIR` optionally adds a skills checkout. The PR's own `CLAUDE.md`, `AGENTS.md` and `.claude/` are removed before review; nothing from the PR head configures the reviewer.
+Per-repo context lives in the private `rsrobo-notes` repo at `<owner>/<repo>/`: an `AGENTS.md` with the review notes, a `CLAUDE.md` whose only line is `@AGENTS.md`, and optional `.claude/skills/`. `AGENTS.md` is the file every engine reads (pi and Codex natively, Claude Code through the import), so the notes are written once. Point `RSROBO_NOTES_DIR` at the checkout. `RSROBO_SKILLS_DIR` optionally adds a skills checkout.
+
+The PR's own `CLAUDE.md`, `AGENTS.md`, `.claude/`, `.pi/` and `.agents/` are removed before review; nothing from the PR head configures the reviewer. When the repository has an `AGENTS.md` or `CLAUDE.md` on the base branch, which a PR cannot edit, it is handed to the reviewer as data in `.rsrobo/repo-guidance.md`.
+
+What goes into a notes file, from the published evidence: commands with flags first, defect patterns to flag, conventions that differ from the language default, pitfalls, and what not to flag. No repository overview or directory map; they raise cost and do not help. Under 80 lines. Paths only where they are unlikely to move.
 
 ## Hub workflow
 
@@ -47,7 +51,7 @@ Command grammar:
 - Unlisted repos get every fix level, every provider and public plus internal kb lessons; the `repos` entries in `config.json` restrict the LLNL orgs.
 - `@rsrobo ask <question>` on an issue or a PR answers from the default branch and the kb, with linked code references and a sources line. On an issue the question may refer to it: `ask have we implemented this?`, `ask search duplicates`. The model sees the issue, keyword-matched open items with a body excerpt, and every open title. Haiku by default, a few cents. The answer is posted by the bot in the thread and copied to the inbox. A stranger's ask waits for your `approve` like every other command.
 - `@rsrobo summarize` on a PR writes a reviewer brief: what changes, why, read first, how to test, risks, open questions. `@rsrobo triage` on an issue gives type, area, severity, duplicate, state and labels from the repo's own label set, with evidence and what the reporter must add. Both post in the thread and copy to the inbox.
-- `@rsrobo init-notes` drafts `<owner>/<repo>/CLAUDE.md` in the notes repo from the default branch. It never overwrites an existing file.
+- `@rsrobo init-notes` drafts `<owner>/<repo>/AGENTS.md` in the notes repo from the default branch, with the `CLAUDE.md` import beside it. It never overwrites an existing file.
 - Requesting a review from the bot on the PR page starts a default review. Own repos only; the bot must be a collaborator.
 - Only `rayandrew` can start a run. When someone else mentions the bot, it replies once that only the owner can start it, and the request lands in the inbox with the command to copy. `@rsrobo approve [model=... effort=... budget=...]` on the same PR runs their most recent request; your keys replace theirs, so you can cap the model and effort.
 

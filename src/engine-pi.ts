@@ -55,7 +55,6 @@ export function runReviewPi(
       "--mode",
       "json",
       "--no-session",
-      "--no-context-files",
       "--no-skills",
       "--approve",
       "--tools",

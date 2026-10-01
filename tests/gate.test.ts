@@ -19,4 +19,8 @@ test("gate reads the test command from notes and runs it without the job environ
   assert.match(g.output, /ok/);
   writeFileSync(join(dir, "CLAUDE.md"), "- test: `exit 3`\n");
   assert.equal(runGate(dir, 1).status, "fail");
+  writeFileSync(join(dir, "CLAUDE.md"), "@AGENTS.md\n");
+  writeFileSync(join(dir, "AGENTS.md"), "## Commands\n- test: `true`\n");
+  assert.equal(testCommand(dir), "true");
+  assert.equal(runGate(dir, 1).status, "pass");
 });

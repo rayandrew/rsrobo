@@ -76,7 +76,6 @@ export function runAgent(dir: string, prompt: string, o: AgentOptions): { text: 
       "--mode",
       "json",
       "--no-session",
-      "--no-context-files",
       "--no-skills",
       "--approve",
       "--tools",

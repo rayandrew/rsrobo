@@ -52,7 +52,7 @@ export function runFix(
     .join("\n");
   const out = runAgent(dir, prompt, { engine: o.engine, effort: "high", budgetUsd: o.budgetUsd, tools: "edit" });
   const git = (...a: string[]) => execFileSync("git", ["-C", dir, ...a], { encoding: "utf8", maxBuffer: 64 << 20 });
-  git("add", "-A", "--", ".", ":!.rsrobo", ":!CLAUDE.md", ":!.claude");
+  git("add", "-A", "--", ".", ":!.rsrobo", ":!CLAUDE.md", ":!AGENTS.md", ":!.claude", ":!.pi", ":!.agents");
   const patch = git("diff", "--cached");
   git("reset", "-q");
   return { patch, note: out.text };
