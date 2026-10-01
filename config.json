@@ -38,6 +38,43 @@
   "ask_model": "haiku",
   "verify_model": "sonnet",
   "repos": {
+    "llnl-asr/dftracer-utils": {
+      "post": "review",
+      "kb": ["public"],
+      "fix": ["patch", "suggest", "stacked", "push"],
+      "providers": ["claude", "openai-codex", "openrouter"],
+      "vendors": [
+        "anthropic",
+        "openai",
+        "google",
+        "x-ai",
+        "meta-llama",
+        "meta",
+        "nvidia",
+        "amazon",
+        "microsoft",
+        "perplexity",
+        "cohere"
+      ],
+      "commits": {
+        "types": [
+          "feat",
+          "fix",
+          "perf",
+          "refactor",
+          "docs",
+          "test",
+          "build",
+          "ci",
+          "style",
+          "chore",
+          "revert",
+          "bench",
+          "release"
+        ],
+        "severity": "P1"
+      }
+    },
     "llnl-asr/*": {
       "post": "review",
       "kb": ["public"],
