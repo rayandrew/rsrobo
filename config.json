@@ -27,19 +27,58 @@
       "post": "review",
       "kb": ["public"],
       "fix": ["patch", "suggest"],
-      "providers": ["claude", "openai-codex", "openrouter"]
+      "providers": ["claude", "openai-codex", "openrouter"],
+      "vendors": [
+        "anthropic",
+        "openai",
+        "google",
+        "x-ai",
+        "meta-llama",
+        "meta",
+        "nvidia",
+        "amazon",
+        "microsoft",
+        "perplexity",
+        "cohere"
+      ]
     },
     "llnl/*": {
       "post": "review",
       "kb": ["public"],
       "fix": ["patch", "suggest"],
-      "providers": ["claude", "openai-codex", "openrouter"]
+      "providers": ["claude", "openai-codex", "openrouter"],
+      "vendors": [
+        "anthropic",
+        "openai",
+        "google",
+        "x-ai",
+        "meta-llama",
+        "meta",
+        "nvidia",
+        "amazon",
+        "microsoft",
+        "perplexity",
+        "cohere"
+      ]
     },
     "dftracer/*": {
       "post": "review",
       "kb": ["public"],
       "fix": ["patch", "suggest"],
-      "providers": ["claude", "openai-codex", "openrouter"]
+      "providers": ["claude", "openai-codex", "openrouter"],
+      "vendors": [
+        "anthropic",
+        "openai",
+        "google",
+        "x-ai",
+        "meta-llama",
+        "meta",
+        "nvidia",
+        "amazon",
+        "microsoft",
+        "perplexity",
+        "cohere"
+      ]
     },
     "rayandrew/*": {
       "post": "review",

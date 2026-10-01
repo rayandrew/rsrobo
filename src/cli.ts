@@ -118,17 +118,24 @@ const resolve = (name: string): Engine => {
     `unknown model "${name}"; aliases: ${Object.keys(config.models).join(", ")}; or provider/model with provider in ${config.pi_providers.join(", ")}`,
   );
 };
-type Policy = { kb?: Sensitivity[]; fix?: Via[]; providers?: string[] };
+type Policy = { kb?: Sensitivity[]; fix?: Via[]; providers?: string[]; vendors?: string[] };
 const repoPolicy = (owner: string, repo: string): Policy | undefined =>
   Object.entries(config.repos as Record<string, Policy>).find(([g]) =>
     new RegExp(`^${g.replace(/\*/g, "[^/]*")}$`).test(`${owner}/${repo}`),
   )?.[1];
 // Per-repo provider policy: LLNL work must not go to Chinese-origin models, so freeinference is off there.
+// `vendors`, when set, also limits OpenRouter to those model vendors (the part before the slash, `~` dropped).
 const allowedEngine = (e: Engine, owner: string, repo: string): Engine => {
+  const policy = repoPolicy(owner, repo);
   const provider = e.engine === "claude" ? "claude" : e.provider;
-  const allowed = repoPolicy(owner, repo)?.providers ?? ["claude", ...config.pi_providers];
+  const allowed = policy?.providers ?? ["claude", ...config.pi_providers];
   if (!allowed.includes(provider))
     fail(`provider ${provider} is not allowed on ${owner}/${repo}; allowed: ${allowed.join(", ")}`);
+  if (e.engine === "pi" && e.provider === "openrouter" && policy?.vendors) {
+    const vendor = e.model.split("/")[0].replace(/^~/, "");
+    if (!policy.vendors.includes(vendor))
+      fail(`openrouter vendor ${vendor} is not allowed on ${owner}/${repo}; allowed: ${policy.vendors.join(", ")}`);
+  }
   return e;
 };
 const alias = (name: string): string => {
