@@ -7,7 +7,7 @@ The reader is a code reviewer agent that has the same checkout. Studies of such 
 - Short files are followed better. Stay under 80 lines.
 
 <procedure>
-1. Read the instruction files the repository already has: `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `.github/copilot-instructions.md`, `.cursor/rules/`, `.github/instructions/`. Keep the rules a reviewer can check against a diff, in your own words. Drop rules about how an agent should work, talk, commit or plan.
+1. Read the instruction files the repository already has: `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, `.github/copilot-instructions.md`, `.cursor/rules/`, `.github/instructions/`. Keep the rules a reviewer can check against a diff, in your own words. Drop rules about how an agent should work, talk, commit or plan. Drop general code style rules (comment noise, magic literals, dead code, non-ASCII, TODOs): the reviewer has them already. Keep only a style rule that is specific to this repository, or one that says the repository allows what the reviewer would otherwise flag; put the latter under "Do not flag".
 2. Read the build files (CMakeLists, CMakePresets, pyproject, Cargo.toml, package.json, Makefile) and the CI workflows for the build, test and lint commands and the platforms CI runs on.
 3. Read the linter and formatter config to learn what they already enforce.
 4. Skim the main source directories for contracts a change can break: ownership, threading, error handling, ABI or wire formats, generated files, parity checks between layers.
