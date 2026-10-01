@@ -295,7 +295,7 @@ export function overview(pr: Pr, r: Result, shown: Finding[], posted?: Set<numbe
   }
   if (issues.length) {
     out.push(
-      `**Commit messages.** ${issues.length} of ${pr.commits.length + 1} subjects do not follow Conventional Commits.`,
+      `**Commit messages.** ${issues.length} problem${issues.length === 1 ? "" : "s"}: ${describeIssues(issues)}.`,
       table(
         ["Sev", "Where", "Subject", "Problem", "Suggested"],
         issues.map((c) => [
@@ -359,6 +359,18 @@ const agentText = (pr: Pr, f: Finding) =>
     `Fix: ${f.fix}`,
     "Change only what the fix needs. Run the relevant tests.",
   ].join("\n");
+
+const describeIssues = (issues: CommitIssue[]) => {
+  const form = issues.filter((c) => !c.remove).length;
+  const attr = issues.length - form;
+  return [
+    form && `${form} subject${form === 1 ? " is" : "s are"} not Conventional Commits`,
+    attr &&
+      `${attr} ${attr === 1 ? "message has" : "messages have"} AI attribution, which this repository does not accept`,
+  ]
+    .filter(Boolean)
+    .join("; ");
+};
 
 const cell = (s: string) => s.replace(/[|`]/g, " ").slice(0, 80);
 

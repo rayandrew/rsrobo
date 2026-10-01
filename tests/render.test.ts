@@ -226,9 +226,12 @@ test("commit issues show in the overview and turn a clean review into needs chan
       },
     ],
   };
-  const md = render({ ...pr, commits: [{ sha: "b".repeat(40), subject: "Update LICENSE" }] }, withIssue);
+  const md = render(
+    { ...pr, commits: [{ sha: "b".repeat(40), subject: "Update LICENSE", message: "Update LICENSE" }] },
+    withIssue,
+  );
   assert.match(md, /^> \[!CAUTION\]\n> \*\*Needs changes\.\*\* No findings in 2 files/);
-  assert.match(md, /\*\*Commit messages\.\*\* 1 of 2 subjects do not follow Conventional Commits\./);
+  assert.match(md, /\*\*Commit messages\.\*\* 1 problem: 1 subject is not Conventional Commits\./);
   assert.match(
     md,
     /\| P1 \| \[bbbbbbb\]\(https:\/\/x\/c\) \| `Update LICENSE` \| not `type\(scope\): description` \| `docs: update the license` \|/,

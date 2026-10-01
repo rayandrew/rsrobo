@@ -11,6 +11,8 @@ export type CommitIssue = {
   severity: Severity;
   url: string;
   suggested?: string;
+  // Lines to delete from the message: AI attribution.
+  remove?: string[];
 };
 
 // A replacement subject from the model, keyed by `where` of the issue it replaces.
@@ -28,6 +30,21 @@ export function subjectProblem(subject: string, types: string[]): string | null 
   return null;
 }
 
+// AI attribution in a commit message or a PR body: a co-author trailer for a tool, or a generated-by line.
+const AI_NAMES =
+  /\b(claude|anthropic|copilot|chatgpt|openai|codex|gemini|cursor|windsurf|devin|aider|cline|roo|sweep|jules|opencode|pi\.dev|llm|ai)\b/i;
+const TRAILER = /^(co-authored-by|assisted-by|generated-by|ai-generated|made-with|authored-with):\s*(.*)$/i;
+const BADGE =
+  /^(generated|made|written|created|authored|assisted) (with|by) (claude|copilot|chatgpt|codex|gemini|cursor|an? ai|ai)\b|🤖/i;
+export const attributionLines = (message: string) =>
+  message
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => {
+      const t = TRAILER.exec(l);
+      return t ? AI_NAMES.test(t[2]) || !/co-authored-by/i.test(t[1]) : BADGE.test(l);
+    });
+
 // Checked in code, not by the model: every commit subject of the PR and its title, which a squash merge keeps.
 export function checkCommits(pr: Pr, policy: CommitPolicy | undefined): CommitIssue[] {
   if (!policy) return [];
@@ -38,6 +55,20 @@ export function checkCommits(pr: Pr, policy: CommitPolicy | undefined): CommitIs
   };
   add("PR title", pr.title, pr.html_url);
   for (const c of pr.commits) add(c.sha.slice(0, 7), c.subject, `${pr.html_url}/commits/${c.sha}`);
+  const attribution = (where: string, text: string, url: string) => {
+    const remove = attributionLines(text);
+    if (remove.length)
+      out.push({
+        where,
+        subject: where === "PR body" ? "" : text.split("\n")[0],
+        problem: `AI attribution: ${remove.map((l) => `\`${l.replace(/[|`]/g, " ").slice(0, 60)}\``).join(", ")}`,
+        severity: policy.severity,
+        url,
+        remove,
+      });
+  };
+  attribution("PR body", pr.body, pr.html_url);
+  for (const c of pr.commits) attribution(c.sha.slice(0, 7), c.message, `${pr.html_url}/commits/${c.sha}`);
   return out;
 }
 
@@ -49,7 +80,7 @@ export const commitsBrief = (issues: CommitIssue[], types: string[]) =>
     `Form: \`type(scope): description\`, lowercase, imperative, under 72 characters, the scope optional. Types: ${types.join(", ")}.`,
     "Choose the type from what that commit changes in the diff.",
     "",
-    ...issues.map((c) => `- where: ${c.where} | subject: ${c.subject}`),
+    ...issues.filter((c) => !c.remove).map((c) => `- where: ${c.where} | subject: ${c.subject}`),
   ].join("\n");
 
 // A suggestion is shown only when it passes the same check that found the issue.
@@ -62,18 +93,24 @@ export function applySuggestions(issues: CommitIssue[], subjects: CommitSubject[
 }
 
 export const REWORD_HOW =
-  "To fix: reword each commit with `git rebase -i`, then `git push --force-with-lease`. Edit the PR title on GitHub.";
+  "To fix: reword each commit with `git rebase -i`, then `git push --force-with-lease`. Edit the PR title and body on GitHub.";
 
 export function commitsAgentText(pr: Pr, issues: CommitIssue[]): string {
   const to = (c: CommitIssue) => (c.suggested ? `"${c.suggested}"` : "a subject of the form type(scope): description");
-  const commits = issues.filter((c) => c.where !== "PR title");
+  const commits = issues.filter((c) => c.where !== "PR title" && c.where !== "PR body");
   const title = issues.find((c) => c.where === "PR title");
+  const body = issues.find((c) => c.where === "PR body");
   return [
-    `Reword commit messages on branch ${pr.head_ref} of ${pr.head_repo} (${pr.html_url}) to Conventional Commits.`,
+    `Fix the commit messages on branch ${pr.head_ref} of ${pr.head_repo} (${pr.html_url}).`,
     "Change only the messages. Do not change the code.",
-    ...commits.map((c) => `${c.where}: "${c.subject}" -> ${to(c)}`),
+    ...commits.map((c) =>
+      c.remove
+        ? `${c.where}: delete these lines from the message: ${c.remove.map((l) => `"${l}"`).join(", ")}`
+        : `${c.where}: "${c.subject}" -> ${to(c)}`,
+    ),
     commits.length && `Run \`git rebase -i ${pr.base.slice(0, 7)}\` and mark each listed commit \`reword\`.`,
     title && `Set the pull request title to ${to(title)}.`,
+    body && `Delete these lines from the pull request description: ${body.remove?.map((l) => `"${l}"`).join(", ")}.`,
     commits.length && "Do not push. Tell the user to run `git push --force-with-lease`.",
   ]
     .filter(Boolean)
