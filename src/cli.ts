@@ -8,7 +8,7 @@ import type { Engine } from "./agent.ts";
 import { askRepo, decorate } from "./ask.ts";
 import { type BenchRun, benchMd, lastRun, loadCases, saveRun, score } from "./bench.ts";
 import { ciReport } from "./ci.ts";
-import { type CommitPolicy, checkCommits } from "./commits.ts";
+import { applySuggestions, type CommitPolicy, checkCommits, commitsBrief } from "./commits.ts";
 import { compareMd } from "./compare.ts";
 import { runReviewPi } from "./engine-pi.ts";
 import {
@@ -39,6 +39,8 @@ import {
 import { relatedReport } from "./related.ts";
 import {
   initNotes,
+  mergePass,
+  missedFiles,
   type Previous,
   prepare,
   type Result,
@@ -521,23 +523,35 @@ const common = {
   previous,
   budgetUsd: Math.min(Number(values.budget), config.max_budget_usd),
   effort: values.effort ?? "high",
-  focus: values.focus,
   skillsDir: values.skills,
   kbDir: values.kb,
   promptsDir: join(root, "prompts"),
 };
-const result =
+// The code decides which subjects are wrong; the model, which reads the diff, words the replacements.
+const commitIssues = checkCommits(pr, repoConfig?.commits);
+if (commitIssues.length && repoConfig?.commits)
+  writeFileSync(join(dir, ".rsrobo", "commits.md"), commitsBrief(commitIssues, repoConfig.commits.types));
+const run = (focus?: string): Result =>
   engine.engine === "pi"
     ? runReviewPi(dir, pr, {
         ...common,
+        focus,
         model: engine.model,
         verifyModel: engine.model,
         pi: engine,
         verifyPi: verifyEngine.engine === "pi" ? verifyEngine : engine,
       })
-    : runReview(dir, pr, { ...common, model: engine.model, verifyModel: alias(values.verify ?? modelAlias) });
+    : runReview(dir, pr, { ...common, focus, model: engine.model, verifyModel: alias(values.verify ?? modelAlias) });
+let result = run(values.focus);
+// A model that lists a changed source file as skipped gets one more pass over those files only.
+const missed = missedFiles(pr, result.skipped);
+if (missed.length) {
+  console.error(`second pass: ${missed.length} source file(s) were skipped`);
+  const only = `only these files, which an earlier pass did not read in full: ${missed.join(", ")}. Read each one from its first line to its last`;
+  result = mergePass(result, run(only), missed);
+}
 reconcile(previous, result);
-result.commit_issues = checkCommits(pr, repoConfig?.commits);
+result.commit_issues = applySuggestions(commitIssues, result.commit_subjects, repoConfig?.commits?.types ?? []);
 if (values.requester) result.requester = values.requester;
 writeFileSync(join(dir, ".rsrobo", "review.json"), JSON.stringify(result, null, 2));
 const minSeverity = values["min-severity"] as Severity;

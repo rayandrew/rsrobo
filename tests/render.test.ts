@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { Pr } from "../src/github.ts";
-import { type Result, render, saveReview } from "../src/review.ts";
+import { mergePass, missedFiles, type Result, render, saveReview } from "../src/review.ts";
 
 const pr: Pr = {
   owner: "o",
@@ -211,11 +211,45 @@ test("commit issues show in the overview and turn a clean review into needs chan
         problem: "not `type(scope): description`",
         severity: "P1",
         url: "https://x/c",
+        suggested: "docs: update the license",
       },
     ],
   };
   const md = render({ ...pr, commits: [{ sha: "b".repeat(40), subject: "Update LICENSE" }] }, withIssue);
   assert.match(md, /^> \[!CAUTION\]\n> \*\*Needs changes\.\*\* No findings in 2 files/);
   assert.match(md, /\*\*Commit messages\.\*\* 1 of 2 subjects do not follow Conventional Commits\./);
-  assert.match(md, /\| P1 \| \[bbbbbbb\]\(https:\/\/x\/c\) \| `Update LICENSE` \| not `type\(scope\): description` \|/);
+  assert.match(
+    md,
+    /\| P1 \| \[bbbbbbb\]\(https:\/\/x\/c\) \| `Update LICENSE` \| not `type\(scope\): description` \| `docs: update the license` \|/,
+  );
+  assert.match(md, /To fix: reword each commit with `git rebase -i`/);
+  assert.match(
+    md,
+    /bbbbbbb: "Update LICENSE" -> "docs: update the license"\nRun `git rebase -i bbbbbbb` and mark each listed commit `reword`\.\nDo not push\./,
+  );
+});
+
+test("a skipped source file gets a second pass; lock files and styling do not", () => {
+  const files = ["web/View.tsx", "web/view.css", "web/package-lock.json", "src/a.cpp"].map((filename) => ({
+    filename,
+    status: "added",
+    changes: 9,
+  }));
+  const skipped = ["web/View.tsx lines 560-1104: not read", "web/view.css: styling", "web/package-lock.json: skimmed"];
+  const missed = missedFiles({ ...pr, files }, skipped);
+  assert.deepEqual(missed, ["web/View.tsx"]);
+  const second: Result = {
+    ...result,
+    skipped: [],
+    cost_usd: 1,
+    seconds: 10,
+    findings: [
+      { ...result.findings[0] },
+      { ...result.findings[0], file: "web/View.tsx", line_start: 700, line_end: 702, severity: "P1", title: "new" },
+    ],
+  };
+  const merged = mergePass({ ...result, skipped }, second, missed);
+  assert.deepEqual(merged.skipped, ["web/view.css: styling", "web/package-lock.json: skimmed"]);
+  assert.equal(merged.findings.length, result.findings.length + 1);
+  assert.equal(merged.cost_usd, result.cost_usd + 1);
 });

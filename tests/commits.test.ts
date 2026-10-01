@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { checkCommits, subjectProblem } from "../src/commits.ts";
+import { applySuggestions, checkCommits, subjectProblem } from "../src/commits.ts";
 import type { Pr } from "../src/github.ts";
 
 const types = ["feat", "fix", "docs", "chore", "bench"];
@@ -44,4 +44,20 @@ test("checkCommits checks the PR title and every commit, and is off without a po
     ],
   );
   assert.equal(issues[1].url, `https://github.com/o/r/pull/7/commits/${"b".repeat(40)}`);
+});
+
+test("applySuggestions keeps only a suggestion that passes the check", () => {
+  const issue = (where: string) => ({ where, subject: "x", problem: "p", severity: "P1" as const, url: "u" });
+  const out = applySuggestions(
+    [issue("PR title"), issue("aaaaaaa"), issue("bbbbbbb")],
+    [
+      { where: "PR title", subject: "feat(prov): add the provenance view" },
+      { where: "aaaaaaa", subject: "Added things" },
+    ],
+    types,
+  );
+  assert.deepEqual(
+    out.map((c) => c.suggested),
+    ["feat(prov): add the provenance view", undefined, undefined],
+  );
 });
