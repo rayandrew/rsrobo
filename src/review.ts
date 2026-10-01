@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Engine, runAgent } from "./agent.ts";
+import type { CommitIssue } from "./commits.ts";
 import { type Pr, permalink } from "./github.ts";
 import { type Lesson, lessonSchema } from "./lessons.ts";
 
@@ -38,6 +39,7 @@ export type Result = Review & {
   seconds: number;
   files: number;
   requester?: string;
+  commit_issues?: CommitIssue[];
 };
 
 export const reviewSchema = {
@@ -234,17 +236,19 @@ export const shownFindings = (r: Result, minSeverity: Severity) => r.findings.fi
 
 const LEGEND = "<sub>P0 data loss or security. P1 wrong behavior. P2 needs a maintainer decision. P3 minor.</sub>";
 
-export function verdict(shown: Finding[]): string {
-  if (shown.some((f) => f.severity <= "P1")) return "> [!CAUTION]\n> **Needs changes.**";
-  if (shown.length) return "> [!WARNING]\n> **Minor issues.**";
+export function verdict(shown: Finding[], commitIssues: CommitIssue[] = []): string {
+  const all = [...shown.map((f) => f.severity), ...commitIssues.map((c) => c.severity)];
+  if (all.some((s) => s <= "P1")) return "> [!CAUTION]\n> **Needs changes.**";
+  if (all.length) return "> [!WARNING]\n> **Minor issues.**";
   return "> [!TIP]\n> **Looks good.**";
 }
 
 // Overview: verdict, findings table, collapsed walkthrough. Used as the review body and the inbox header.
 export function overview(pr: Pr, r: Result, shown: Finding[]): string {
   const n = shown.length;
+  const issues = r.commit_issues ?? [];
   const out = [
-    `${verdict(shown)} ${n === 0 ? "No findings" : `${n} finding${n === 1 ? "" : "s"}`} in ${r.files} files. \`${r.model}\` at ${r.effort} effort, $${r.cost_usd.toFixed(2)}, ${Math.round(r.seconds / 60)} min.`,
+    `${verdict(shown, issues)} ${n === 0 ? "No findings" : `${n} finding${n === 1 ? "" : "s"}`} in ${r.files} files. \`${r.model}\` at ${r.effort} effort, $${r.cost_usd.toFixed(2)}, ${Math.round(r.seconds / 60)} min.`,
   ];
   if (n) {
     out.push(
@@ -254,6 +258,21 @@ export function overview(pr: Pr, r: Result, shown: Finding[]): string {
       ),
     );
     out.push(LEGEND);
+  }
+  if (issues.length) {
+    out.push(
+      `**Commit messages.** ${issues.length} of ${pr.commits.length + 1} subjects do not follow Conventional Commits.`,
+      table(
+        ["Sev", "Where", "Subject", "Problem"],
+        issues.map((c) => [
+          c.severity,
+          `[${c.where}](${c.url})`,
+          `\`${c.subject.replace(/[|`]/g, " ").slice(0, 80)}\``,
+          c.problem,
+        ]),
+      ),
+    );
+    if (!n) out.push(LEGEND);
   }
   if (r.resolved?.length) {
     out.push(`Resolved since the last review: ${r.resolved.map((f) => `#${f.n} ${f.title}`).join("; ")}.`);

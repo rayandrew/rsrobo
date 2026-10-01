@@ -8,6 +8,7 @@ import type { Engine } from "./agent.ts";
 import { askRepo, decorate } from "./ask.ts";
 import { type BenchRun, benchMd, lastRun, loadCases, saveRun, score } from "./bench.ts";
 import { ciReport } from "./ci.ts";
+import { type CommitPolicy, checkCommits } from "./commits.ts";
 import { compareMd } from "./compare.ts";
 import { runReviewPi } from "./engine-pi.ts";
 import {
@@ -118,7 +119,13 @@ const resolve = (name: string): Engine => {
     `unknown model "${name}"; aliases: ${Object.keys(config.models).join(", ")}; or provider/model with provider in ${config.pi_providers.join(", ")}`,
   );
 };
-type Policy = { kb?: Sensitivity[]; fix?: Via[]; providers?: string[]; vendors?: string[] };
+type Policy = {
+  kb?: Sensitivity[];
+  fix?: Via[];
+  providers?: string[];
+  vendors?: string[];
+  commits?: CommitPolicy;
+};
 const repoPolicy = (owner: string, repo: string): Policy | undefined =>
   Object.entries(config.repos as Record<string, Policy>).find(([g]) =>
     new RegExp(`^${g.replace(/\*/g, "[^/]*")}$`).test(`${owner}/${repo}`),
@@ -530,6 +537,7 @@ const result =
       })
     : runReview(dir, pr, { ...common, model: engine.model, verifyModel: alias(values.verify ?? modelAlias) });
 reconcile(previous, result);
+result.commit_issues = checkCommits(pr, repoConfig?.commits);
 if (values.requester) result.requester = values.requester;
 writeFileSync(join(dir, ".rsrobo", "review.json"), JSON.stringify(result, null, 2));
 const minSeverity = values["min-severity"] as Severity;

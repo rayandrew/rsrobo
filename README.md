@@ -43,6 +43,7 @@ npm run deploy
 
 Command grammar:
 
+- Commit messages are checked in code, not by the model. A repo entry with `commits: {types, severity}` in `config.json` makes each commit subject and the PR title that is not a Conventional Commit a finding of that severity; `P1` gives "Needs changes".
 - A second `review` on the same PR is a re-review: earlier findings keep their numbers, the diff since the last reviewed commit is reviewed in full, and findings the code now handles are listed as resolved.
 - The pi setup step in the workflow copies `pi/rkb-extension.ts`, the file `rkb install pi` generates, because that command asks a question and cannot run in CI. Refresh the copy after an rkb upgrade: `cp ~/.pi/agent/extensions/rkb.ts pi/rkb-extension.ts`.
 - `@rsrobo review [model=alias] [effort=low|medium|high] [budget=usd] [post=pending|review|inbox|comment] [focus=a,b] [free text]` posts a public review as the bot: the overview as the body, one inline comment per finding.

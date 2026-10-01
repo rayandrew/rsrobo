@@ -12,10 +12,26 @@
     "haiku": "claude-haiku-4-5-20251001",
     "sonnet": "claude-sonnet-5-5",
     "opus": "claude-opus-5-5",
-    "luna": { "engine": "pi", "provider": "openai-codex", "model": "gpt-6-luna" },
-    "sol": { "engine": "pi", "provider": "openai-codex", "model": "gpt-6-sol" },
-    "kimi": { "engine": "pi", "provider": "freeinference", "model": "kimi-k2.7-code" },
-    "or-sonnet": { "engine": "pi", "provider": "openrouter", "model": "anthropic/claude-sonnet-5.5" }
+    "luna": {
+      "engine": "pi",
+      "provider": "openai-codex",
+      "model": "gpt-6-luna"
+    },
+    "sol": {
+      "engine": "pi",
+      "provider": "openai-codex",
+      "model": "gpt-6-sol"
+    },
+    "kimi": {
+      "engine": "pi",
+      "provider": "freeinference",
+      "model": "kimi-k2.7-code"
+    },
+    "or-sonnet": {
+      "engine": "pi",
+      "provider": "openrouter",
+      "model": "anthropic/claude-sonnet-5.5"
+    }
   },
   "pi_providers": ["openai-codex", "openrouter", "freeinference"],
   "default_model": "sonnet",
@@ -40,7 +56,25 @@
         "microsoft",
         "perplexity",
         "cohere"
-      ]
+      ],
+      "commits": {
+        "types": [
+          "feat",
+          "fix",
+          "perf",
+          "refactor",
+          "docs",
+          "test",
+          "build",
+          "ci",
+          "style",
+          "chore",
+          "revert",
+          "bench",
+          "release"
+        ],
+        "severity": "P1"
+      }
     },
     "llnl/*": {
       "post": "review",
@@ -59,7 +93,25 @@
         "microsoft",
         "perplexity",
         "cohere"
-      ]
+      ],
+      "commits": {
+        "types": [
+          "feat",
+          "fix",
+          "perf",
+          "refactor",
+          "docs",
+          "test",
+          "build",
+          "ci",
+          "style",
+          "chore",
+          "revert",
+          "bench",
+          "release"
+        ],
+        "severity": "P1"
+      }
     },
     "dftracer/*": {
       "post": "review",
@@ -78,19 +130,73 @@
         "microsoft",
         "perplexity",
         "cohere"
-      ]
+      ],
+      "commits": {
+        "types": [
+          "feat",
+          "fix",
+          "perf",
+          "refactor",
+          "docs",
+          "test",
+          "build",
+          "ci",
+          "style",
+          "chore",
+          "revert",
+          "bench",
+          "release"
+        ],
+        "severity": "P1"
+      }
     },
     "rayandrew/*": {
       "post": "review",
       "kb": ["public", "internal"],
       "fix": ["patch", "suggest", "stacked", "push"],
-      "providers": ["claude", "openai-codex", "openrouter", "freeinference"]
+      "providers": ["claude", "openai-codex", "openrouter", "freeinference"],
+      "commits": {
+        "types": [
+          "feat",
+          "fix",
+          "perf",
+          "refactor",
+          "docs",
+          "test",
+          "build",
+          "ci",
+          "style",
+          "chore",
+          "revert",
+          "bench",
+          "release"
+        ],
+        "severity": "P1"
+      }
     },
     "rslib/*": {
       "post": "review",
       "kb": ["public", "internal"],
       "fix": ["patch", "suggest", "stacked", "push"],
-      "providers": ["claude", "openai-codex", "openrouter", "freeinference"]
+      "providers": ["claude", "openai-codex", "openrouter", "freeinference"],
+      "commits": {
+        "types": [
+          "feat",
+          "fix",
+          "perf",
+          "refactor",
+          "docs",
+          "test",
+          "build",
+          "ci",
+          "style",
+          "chore",
+          "revert",
+          "bench",
+          "release"
+        ],
+        "severity": "P1"
+      }
     }
   }
 }

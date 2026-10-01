@@ -15,8 +15,11 @@ export type Pr = {
   head_repo: string;
   author: string;
   people: People;
+  commits: PrCommit[];
   files: PrFile[];
 };
+
+export type PrCommit = { sha: string; subject: string };
 
 // Who is involved: commit authors, comment and review authors. Logins, deduplicated, without bots.
 export type People = { contributors: string[]; commenters: string[]; reviewers: string[] };
@@ -43,8 +46,16 @@ export function fetchPr(owner: string, repo: string, number: number): Pr {
     head_repo: p.head.repo.full_name,
     author: p.user.login,
     people: people(owner, repo, number),
+    commits: commits(owner, repo, number),
     files,
   };
+}
+
+function commits(owner: string, repo: string, number: number): PrCommit[] {
+  const raw = JSON.parse(
+    gh(["--paginate", "--slurp", `repos/${owner}/${repo}/pulls/${number}/commits?per_page=100`]),
+  ).flat() as { sha: string; commit: { message: string } }[];
+  return raw.map((c) => ({ sha: c.sha, subject: c.commit.message.split("\n")[0] }));
 }
 
 function people(owner: string, repo: string, number: number): People {

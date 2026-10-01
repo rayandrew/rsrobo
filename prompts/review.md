@@ -17,6 +17,7 @@ Do not flag:
 - missing tests or docs
 - a problem that needs an input or state you did not see in the code
 - suggestions, alternatives, or preferences
+- commit messages and the PR title; the tool checks them in code
 
 If you are not certain a finding is real, leave it out. A false report costs more than a miss.
 </rules>

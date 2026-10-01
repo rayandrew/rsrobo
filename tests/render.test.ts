@@ -19,6 +19,7 @@ const pr: Pr = {
   head_repo: "o/r",
   author: "me",
   people: { contributors: ["me"], commenters: [], reviewers: [] },
+  commits: [],
   files: [],
 };
 const result: Result = {
@@ -197,4 +198,24 @@ test("enforceLabels keeps only labels the repository has", async () => {
     "| Labels | bug, performance, needs-info |\n| State | ready |",
   );
   assert.equal(enforceLabels("| Labels | made-up |", ["bug"]), "| Labels | none |");
+});
+
+test("commit issues show in the overview and turn a clean review into needs changes", () => {
+  const withIssue: Result = {
+    ...result,
+    findings: [],
+    commit_issues: [
+      {
+        where: "bbbbbbb",
+        subject: "Update LICENSE",
+        problem: "not `type(scope): description`",
+        severity: "P1",
+        url: "https://x/c",
+      },
+    ],
+  };
+  const md = render({ ...pr, commits: [{ sha: "b".repeat(40), subject: "Update LICENSE" }] }, withIssue);
+  assert.match(md, /^> \[!CAUTION\]\n> \*\*Needs changes\.\*\* No findings in 2 files/);
+  assert.match(md, /\*\*Commit messages\.\*\* 1 of 2 subjects do not follow Conventional Commits\./);
+  assert.match(md, /\| P1 \| \[bbbbbbb\]\(https:\/\/x\/c\) \| `Update LICENSE` \| not `type\(scope\): description` \|/);
 });
