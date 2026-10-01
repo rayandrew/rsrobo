@@ -167,8 +167,14 @@ async function run(env: Env, n: Notification, c: Comment, spec: NonNullable<Retu
       await inbox(env, `rsrobo: bad fix command on ${repo}#${pr}`, `${c.html_url}\n\nUse \`fix 2,3\` or \`fix all\`.`);
       return;
     }
-    const inputs: Record<string, string> = { repo, pr: String(pr), task: "fix", findings: spec.text };
-    for (const k of ["model", "budget", "via", "platform"]) if (spec.args[k]) inputs[k] = spec.args[k];
+    const inputs: Record<string, string> = {
+      repo,
+      pr: String(pr),
+      task: "fix",
+      findings: spec.text,
+      requester: c.user.login,
+    };
+    for (const k of ["model", "budget", "via", "platform", "as"]) if (spec.args[k]) inputs[k] = spec.args[k];
     await dispatch(env, inputs);
     return;
   }

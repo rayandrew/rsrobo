@@ -56,7 +56,7 @@ const config = JSON.parse(readFileSync(join(root, "config.json"), "utf8"));
 const usage = [
   "usage: rsrobo review owner/repo#N [--model alias] [--verify alias] [--budget usd] [--effort high] [--focus a,b] [--full] [--min-severity P2] [--notes dir] [--skills dir] [--post pending|review|inbox|comment] [--save dir] [--kb dir] [--json]",
   "       rsrobo compare owner/repo#N --models a,b [--effort high] [--budget usd] [--kb dir]",
-  "       rsrobo fix owner/repo#N 2,3|all [--via patch|suggest|stacked|push] [--model alias] [--post]",
+  "       rsrobo fix owner/repo#N 2,3|all [--via patch|suggest|stacked|push] [--as bot|me] [--model alias] [--post]",
   "       rsrobo publish owner/repo#N [--save notes]",
   "       rsrobo init-notes owner/repo [--notes dir] [--force]",
   '       rsrobo ask owner/repo "question" [--issue N --post] [--model alias] [--kb dir]',
@@ -86,6 +86,7 @@ const { values, positionals } = parseArgs({
     json: { type: "boolean", default: false },
     models: { type: "string" },
     via: { type: "string", default: "patch" },
+    as: { type: "string", default: "bot" },
     force: { type: "boolean", default: false },
     requester: { type: "string" },
     issue: { type: "string" },
@@ -385,6 +386,9 @@ if (task === "fix") {
   const via = values.via as Via;
   if (!["patch", "suggest", "stacked", "push"].includes(via)) fail(usage);
   const allowedVia: Via[] = repoConfig?.fix ?? ["patch", "suggest", "stacked", "push"];
+  // The commit author: the bot by default, pushed with its token; `--as me` makes the requester the author,
+  // pushed with the user token. The message carries no attribution either way.
+  const author = fixAuthor(values.as, values.requester, config.bot_login);
   if (!allowedVia.includes(via))
     fail(`via=${via} is not allowed on ${owner}/${repo}; allowed: ${allowedVia.join(", ")}`);
   const dir = checkout(pr, values.work);
@@ -433,9 +437,8 @@ if (task === "fix") {
       if (gate.status === "fail") {
         extra += `\n\n\`\`\`text\n${gate.output.trim().split("\n").slice(-40).join("\n")}\n\`\`\``;
       } else if (values.post) {
-        const token = process.env.GH_TOKEN ?? execFileSync("gh", ["auth", "token"], { encoding: "utf8" }).trim();
         const n = f.n ?? 0;
-        extra += ` Delivered: ${deliverCommit(dir, pr, f, n, patch, via, token, config.commit_trailer)}`;
+        extra += ` Delivered: ${deliverCommit(dir, pr, f, n, patch, via, author.token, author)}`;
         execFileSync("git", ["-C", dir, "checkout", "-q", pr.head]);
       }
     }
@@ -619,6 +622,23 @@ function patch() {
 }
 function botToken() {
   return process.env.BOT_TOKEN ?? fail("BOT_TOKEN is not set");
+}
+// Who a fix commit is from. GitHub links the noreply address to the account, so the commit shows that avatar.
+function fixAuthor(as: string | undefined, requester: string | undefined, botLogin: string) {
+  const profile = (login: string) => {
+    const u = JSON.parse(execFileSync("gh", ["api", `users/${login}`], { encoding: "utf8" })) as {
+      id: number;
+      name: string | null;
+    };
+    return { name: u.name || login, email: `${u.id}+${login}@users.noreply.github.com` };
+  };
+  if (as === "me") {
+    const login = requester || execFileSync("gh", ["api", "user", "-q", ".login"], { encoding: "utf8" }).trim();
+    const token = process.env.GH_TOKEN ?? execFileSync("gh", ["auth", "token"], { encoding: "utf8" }).trim();
+    return { ...profile(login), token };
+  }
+  if (as && as !== "bot") fail(`--as must be bot or me, not "${as}"`);
+  return { ...profile(botLogin), token: botToken() };
 }
 function fail(msg: string): never {
   console.error(msg);

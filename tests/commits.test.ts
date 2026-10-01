@@ -68,6 +68,15 @@ test("attributionLines finds AI trailers and badges, and keeps human co-authors"
     "Co-authored-by: Claude <noreply@anthropic.com>",
   ]);
   assert.deepEqual(attributionLines("fix: y\n\nCo-authored-by: Jane Doe <jane@example.org>"), []);
+  assert.deepEqual(attributionLines("fix: y\n\nCo-authored-by: Claude Martin <claude@univ.fr>"), []);
+  assert.deepEqual(attributionLines("fix: y\n\nCo-authored-by: Devin Smith <devin.smith@example.org>"), []);
+  for (const tool of [
+    "Co-authored-by: Claude Code <noreply@anthropic.com>",
+    "Co-authored-by: copilot-swe-agent[bot] <198982749+Copilot@users.noreply.github.com>",
+    "Co-authored-by: GitHub Copilot <copilot@github.com>",
+  ]) {
+    assert.deepEqual(attributionLines(`fix: y\n\n${tool}`), [tool]);
+  }
   assert.deepEqual(attributionLines("fix: y\n\nGenerated with Claude Code\nAssisted-by: rsrobo"), [
     "Generated with Claude Code",
     "Assisted-by: rsrobo",

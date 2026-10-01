@@ -15,6 +15,7 @@ export const KNOWN_KEYS = new Set([
   "platform",
   "tests",
   "effort",
+  "as",
 ]);
 const TASKS = new Set([
   "review",

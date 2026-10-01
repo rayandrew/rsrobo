@@ -30,9 +30,13 @@ export function subjectProblem(subject: string, types: string[]): string | null 
   return null;
 }
 
-// AI attribution in a commit message or a PR body: a co-author trailer for a tool, or a generated-by line.
-const AI_NAMES =
-  /\b(claude|anthropic|copilot|chatgpt|openai|codex|gemini|cursor|windsurf|devin|aider|cline|roo|sweep|jules|opencode|pi\.dev|llm|ai)\b/i;
+// AI attribution in a commit message or a PR body. A co-author is a tool when its email is a tool address or
+// its name is a product name. A first name alone (Claude, Devin, Jules) is a person, so it never counts.
+const TOOL_EMAIL =
+  /@(anthropic\.com|openai\.com|cursor\.(sh|com)|devin\.ai|windsurf\.com|cognition\.ai)\b|copilot@github\.com|\[bot\]/i;
+const PRODUCT =
+  /\b(claude code|claude (opus|sonnet|haiku)|github copilot|copilot (agent|swe)|chatgpt|openai codex|codex (cli|agent)|cursor agent|gemini (cli|code assist)|devin ai|claude\.ai|anthropic claude)\b/i;
+/\b(claude|anthropic|copilot|chatgpt|openai|codex|gemini|cursor|windsurf|devin|aider|cline|roo|sweep|jules|opencode|pi\.dev|llm|ai)\b/i;
 const TRAILER = /^(co-authored-by|assisted-by|generated-by|ai-generated|made-with|authored-with):\s*(.*)$/i;
 const BADGE =
   /^(generated|made|written|created|authored|assisted) (with|by) (claude|copilot|chatgpt|codex|gemini|cursor|an? ai|ai)\b|🤖/i;
@@ -42,7 +46,7 @@ export const attributionLines = (message: string) =>
     .map((l) => l.trim())
     .filter((l) => {
       const t = TRAILER.exec(l);
-      return t ? AI_NAMES.test(t[2]) || !/co-authored-by/i.test(t[1]) : BADGE.test(l);
+      return t ? !/co-authored-by/i.test(t[1]) || TOOL_EMAIL.test(t[2]) || PRODUCT.test(t[2]) : BADGE.test(l);
     });
 
 // Checked in code, not by the model: every commit subject of the PR and its title, which a squash merge keeps.

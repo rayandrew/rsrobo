@@ -113,7 +113,9 @@ export const fixMd = (pr: Pr, f: Finding, patch: string, note: string, applies: 
     .join("\n\n");
 };
 
-// Applies the patch on the checkout, records it with the trailer, and delivers it: `push` onto the PR's own
+export type Author = { name: string; email: string };
+
+// Applies the patch on the checkout, commits it as `author` with a clean message, and delivers it: `push` onto the PR's own
 // branch, `stacked` onto a new branch in the base repository with a PR against the PR branch. Returns the URL.
 export function deliverCommit(
   dir: string,
@@ -123,23 +125,14 @@ export function deliverCommit(
   patch: string,
   via: "stacked" | "push",
   token: string,
-  trailer: string,
+  author: Author,
 ): string {
   const git = (...a: string[]) => execFileSync("git", ["-C", dir, ...a], { encoding: "utf8", maxBuffer: 64 << 20 });
   execFileSync("git", ["-C", dir, "apply", "--index", "-"], { input: patch });
   const branch = via === "push" ? pr.head_ref : `rsrobo/fix-${pr.number}-${n}`;
   const remote = via === "push" ? pr.head_repo : `${pr.owner}/${pr.repo}`;
   git("checkout", "-q", "-B", branch);
-  git(
-    "-c",
-    "user.name=rsrobo",
-    "-c",
-    "user.email=rsrobo@users.noreply.github.com",
-    "commit",
-    "-q",
-    "-m",
-    `fix: ${f.title}\n\n${trailer}`,
-  );
+  git("-c", `user.name=${author.name}`, "-c", `user.email=${author.email}`, "commit", "-q", "-m", `fix: ${f.title}`);
   git("push", "-q", `https://x-access-token:${token}@github.com/${remote}.git`, `HEAD:refs/heads/${branch}`);
   if (via === "push") return `${pr.html_url}/commits/${git("rev-parse", "HEAD").trim()}`;
   const body = `Applies finding ${n} from the rsrobo review of #${pr.number}: ${f.title}.\n\n${f.problem}\n\nFix: ${f.fix}`;
