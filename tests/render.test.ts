@@ -4,7 +4,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { conversationMd, type Pr } from "../src/github.ts";
-import { blocking, buildPrompt, mergePass, missedFiles, type Result, render, saveReview } from "../src/review.ts";
+import { numbersIn } from "../src/post.ts";
+import {
+  blocking,
+  buildPrompt,
+  mergePass,
+  missedFiles,
+  overview,
+  type Result,
+  reconcile,
+  render,
+  saveReview,
+} from "../src/review.ts";
 
 const pr: Pr = {
   owner: "o",
@@ -282,4 +293,24 @@ test("the conversation keeps people, marks owners, and drops the bot and command
     md,
     '<comment by="ray" role="owner">\nnot a bug, we want this\n</comment>\n<comment by="dev" role="other" at="a.ts:3">\nthis is intended\n</comment>',
   );
+});
+
+test("a finding the bot already posted stays in the table only, and its number is never reused", () => {
+  const posted = numbersIn([
+    "**1. P1 wrong sum** at x\n\ntext",
+    "> verdict\n\n---\n\n**3. P3 minor**",
+    "**bold** not a finding",
+  ]);
+  assert.deepEqual([...posted], [1, 3]);
+  const f = { ...result.findings[0], n: 1 };
+  assert.match(
+    overview(pr, { ...result, findings: [f] }, [f], posted),
+    /minor \(still open, see the earlier comment\) \|/,
+  );
+  const next = reconcile(
+    { head: "h", findings: [], maxN: 4 },
+    { ...result, findings: [{ ...result.findings[0], n: undefined }] },
+  );
+  assert.equal(next.findings[0].n, 5);
+  assert.equal(next.max_n, 5);
 });

@@ -364,7 +364,7 @@ if (task === "publish") {
   const dir = checkout(pr, values.work);
   const saved = loadFindings(pr, values.save || undefined, dir);
   const patch = readFileSync(join(dir, ".rsrobo", "diff.patch"), "utf8");
-  const url = postReview(pr, saved, patch, botToken(), "review", values["min-severity"] as Severity);
+  const url = postReview(pr, saved, patch, botToken(), "review", values["min-severity"] as Severity, config.bot_login);
   const userToken = process.env.GH_TOKEN ?? execFileSync("gh", ["auth", "token"], { encoding: "utf8" }).trim();
   const base = `repos/${pr.owner}/${pr.repo}/pulls/${pr.number}/reviews`;
   const mine = JSON.parse(
@@ -512,7 +512,7 @@ try {
   if (last.findings.every((f) => f.n === undefined)) {
     for (const [i, f] of last.findings.entries()) f.n = i + 1;
   }
-  previous = { head: (last as { head?: string }).head ?? pr.head, findings: last.findings };
+  previous = { head: (last as { head?: string }).head ?? pr.head, findings: last.findings, maxN: last.max_n };
   if (previous.head !== pr.head) {
     execFileSync("git", ["-C", dir, "fetch", "-q", "origin", previous.head]);
     writeFileSync(
@@ -589,8 +589,8 @@ const savedFile = values.save ? saveReview(values.save, pr, result, minSeverity)
 if (values.post) {
   const userToken = process.env.GH_TOKEN ?? execFileSync("gh", ["auth", "token"], { encoding: "utf8" }).trim();
   const url = {
-    pending: () => postReview(pr, result, patch(), userToken, "pending", minSeverity),
-    review: () => postReview(pr, result, patch(), botToken(), "review", minSeverity),
+    pending: () => postReview(pr, result, patch(), userToken, "pending", minSeverity, config.bot_login),
+    review: () => postReview(pr, result, patch(), botToken(), "review", minSeverity, config.bot_login),
     inbox: () => postInbox(pr, result, userToken, config.inbox_repo),
     comment: () => postComment(pr, result, botToken(), config.bot_login),
   }[values.post as PostMode];

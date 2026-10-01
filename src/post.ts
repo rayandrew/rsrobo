@@ -22,6 +22,19 @@ function gh(token: string, args: string[], input?: unknown): unknown {
   return out ? JSON.parse(out) : null;
 }
 
+// Finding numbers in the bot's public comments on this PR. Each finding text starts with "**N. ".
+export const numbersIn = (texts: string[]) =>
+  new Set(texts.flatMap((t) => [...t.matchAll(/^\*\*(\d+)\. P[0-3] /gm)].map((m) => Number(m[1]))));
+
+function postedNumbers(pr: Pr, token: string, botLogin: string): Set<number> {
+  const base = `repos/${pr.owner}/${pr.repo}/pulls/${pr.number}`;
+  type Raw = { user: { login: string } | null; body: string | null; state?: string };
+  const mine = [`${base}/comments?per_page=100`, `${base}/reviews?per_page=100`]
+    .flatMap((path) => gh(token, [path]) as Raw[])
+    .filter((c) => c.user?.login === botLogin && c.state !== "PENDING");
+  return numbersIn(mine.map((c) => c.body ?? ""));
+}
+
 // Review on the PR: inline comments for findings inside the diff, the rest in the body.
 // `pending` under my token stays private until I submit it; `review` under the bot token is public at once.
 export function postReview(
@@ -31,6 +44,7 @@ export function postReview(
   token: string,
   mode: "pending" | "review",
   minSeverity = "P3",
+  botLogin?: string,
 ): string {
   const base = `repos/${pr.owner}/${pr.repo}/pulls/${pr.number}/reviews`;
   if (mode === "pending") {
@@ -39,8 +53,11 @@ export function postReview(
   }
   const lines = commentableLines(patch);
   const shown = shownFindings(r, minSeverity as "P0" | "P1" | "P2" | "P3");
-  const inline = shown.filter((f) => inDiff(lines, f.file, f.line_start, f.line_end));
-  const rest = shown.filter((f) => !inline.includes(f));
+  // A finding the bot already commented on in an earlier review stays in the table only; its text is not posted again.
+  const posted = botLogin ? postedNumbers(pr, token, botLogin) : new Set<number>();
+  const fresh = shown.filter((f) => f.n === undefined || !posted.has(f.n));
+  const inline = fresh.filter((f) => inDiff(lines, f.file, f.line_start, f.line_end));
+  const rest = fresh.filter((f) => !inline.includes(f));
   const comments = inline.map((f) => ({
     path: f.file,
     line: f.line_end,
@@ -48,7 +65,7 @@ export function postReview(
     ...(f.line_end > f.line_start ? { start_line: f.line_start, start_side: "RIGHT" } : {}),
     body: findingMd(pr, f, false, f.n),
   }));
-  const parts = [overview(pr, r, shown), ...rest.map((f) => findingMd(pr, f, true, f.n))];
+  const parts = [overview(pr, r, shown, posted), ...rest.map((f) => findingMd(pr, f, true, f.n))];
   if (mode === "review") parts.push(AI_NOTE);
   const body = parts.join("\n\n---\n\n");
   const req = { commit_id: pr.head, body, comments };

@@ -41,6 +41,8 @@ export type Result = Review & {
   files: number;
   requester?: string;
   commit_issues?: CommitIssue[];
+  // Highest finding number this PR has used, so a number is never given to a second finding.
+  max_n?: number;
   // One line under the verdict: what this run covered when it was not a full review.
   note?: string;
 };
@@ -105,7 +107,7 @@ const kbArgs = [
 ];
 
 // `sinceFiles` set means an incremental re-review: only these files changed since the last reviewed head.
-export type Previous = { head: string; findings: Finding[]; sinceFiles?: string[] };
+export type Previous = { head: string; findings: Finding[]; sinceFiles?: string[]; maxN?: number };
 
 export type Options = {
   model: string;
@@ -179,7 +181,7 @@ function previousBlock(prev: Previous, head: string): string {
 export function reconcile(prev: Previous | undefined, r: Result): Result {
   const same = (a: Finding, b: Finding) =>
     a.file === b.file && a.line_start <= b.line_end + 5 && b.line_start <= a.line_end + 5;
-  let next = Math.max(0, ...(prev?.findings.map((f) => f.n ?? 0) ?? []));
+  let next = Math.max(prev?.maxN ?? 0, ...(prev?.findings.map((f) => f.n ?? 0) ?? []));
   const matched = new Set<number>();
   for (const f of r.findings) {
     const old = prev?.findings.find((p) => p.n !== undefined && !matched.has(p.n) && same(p, f));
@@ -189,6 +191,7 @@ export function reconcile(prev: Previous | undefined, r: Result): Result {
     } else f.n = ++next;
   }
   r.resolved = prev?.findings.filter((p) => p.n !== undefined && !matched.has(p.n)) ?? [];
+  r.max_n = next;
   return r;
 }
 
@@ -268,7 +271,8 @@ export function verdict(shown: Finding[], commitIssues: CommitIssue[] = []): str
 }
 
 // Overview: verdict, findings table, collapsed walkthrough. Used as the review body and the inbox header.
-export function overview(pr: Pr, r: Result, shown: Finding[]): string {
+// `posted` holds the numbers of findings the bot already commented on in this PR; the table marks them.
+export function overview(pr: Pr, r: Result, shown: Finding[], posted?: Set<number>): string {
   const n = shown.length;
   const issues = r.commit_issues ?? [];
   const out = [
@@ -279,7 +283,12 @@ export function overview(pr: Pr, r: Result, shown: Finding[]): string {
     out.push(
       table(
         ["#", "Sev", "Where", "Finding"],
-        shown.map((f) => [String(f.n ?? ""), f.severity, where(pr, f), f.title]),
+        shown.map((f) => [
+          String(f.n ?? ""),
+          f.severity,
+          where(pr, f),
+          `${f.title}${f.n !== undefined && posted?.has(f.n) ? " (still open, see the earlier comment)" : ""}`,
+        ]),
       ),
     );
     out.push(LEGEND);
