@@ -47,9 +47,6 @@ const env: Env = {
     get: async (k: string) => seen.get(k) ?? null,
     put: async (k: string, v: string) => void seen.set(k, v),
     delete: async (k: string) => void seen.delete(k),
-    list: async ({ prefix }: { prefix: string }) => ({
-      keys: [...seen.keys()].filter((k) => k.startsWith(prefix)).map((name) => ({ name })),
-    }),
   } as unknown as KVNamespace,
   BOT_TOKEN: "b",
   USER_TOKEN: "u",
@@ -60,6 +57,7 @@ const env: Env = {
   ALLOWED_COMMENTERS: "me",
   ALLOWED_REPOS: "*/*",
 };
+const watched = () => (JSON.parse(seen.get("watches") ?? "{}") as Record<string, { head: string }>)["o/r#7"];
 const dispatches = (calls: { url: string; body?: unknown }[]) =>
   calls.filter((c) => c.url.endsWith("/dispatches")).map((c) => (c.body as { inputs: unknown }).inputs);
 
@@ -234,7 +232,7 @@ test("approve watch reviews the PR again after each push, once per push, until i
   ]);
   await poll(env);
   assert.deepEqual(dispatches(calls), [{ repo: "o/r", pr: "7", requester: "me" }]);
-  assert.equal(JSON.parse(seen.get("watch:o/r#7") ?? "{}").head, "h1");
+  assert.equal(watched().head, "h1");
   // Same head: nothing. The stranger's own request still waits.
   calls = fakeGitHub([{ id: 52, body: "@rsrobo review", user: { login: "stranger" }, html_url: "https://x/52" }]);
   await poll(env);
@@ -250,7 +248,7 @@ test("approve watch reviews the PR again after each push, once per push, until i
   calls = fakeGitHub([], "PullRequest", { reason: "subscribed", head: "h3", state: "closed" });
   await poll(env);
   assert.equal(dispatches(calls).length, 0);
-  assert.ok(!seen.has("watch:o/r#7"));
+  assert.ok(!watched());
 });
 
 test("watch and unwatch on their own; approve all watch does both", async () => {
@@ -258,17 +256,17 @@ test("watch and unwatch on their own; approve all watch does both", async () => 
   let calls = fakeGitHub([{ id: 60, body: "@rsrobo watch", user: { login: "me" }, html_url: "" }]);
   await poll(env);
   assert.equal(dispatches(calls).length, 0);
-  assert.ok(seen.has("watch:o/r#7"));
+  assert.ok(watched());
   calls = fakeGitHub([{ id: 61, body: "@rsrobo unwatch", user: { login: "me" }, html_url: "" }]);
   await poll(env);
-  assert.ok(!seen.has("watch:o/r#7"));
+  assert.ok(!watched());
   calls = fakeGitHub([
     { id: 62, body: "@rsrobo review", user: { login: "stranger" }, html_url: "https://x/62" },
     { id: 63, body: "@rsrobo approve all watch", user: { login: "me" }, html_url: "" },
   ]);
   await poll(env);
   assert.equal(dispatches(calls).length, 1);
-  assert.ok(seen.has("watch:o/r#7"));
+  assert.ok(watched());
   assert.ok(seen.has("trust:o/r#7:stranger"));
   // A stranger cannot watch.
   calls = fakeGitHub([{ id: 64, body: "@rsrobo watch", user: { login: "stranger" }, html_url: "https://x/64" }]);

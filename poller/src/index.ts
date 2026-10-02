@@ -38,31 +38,42 @@ export async function poll(env: Env) {
 }
 
 // A watched PR gets an incremental review after every push. GitHub sends no notification for a push, so the
-// poller reads each watched PR's head once a minute. The record holds the last head it dispatched for.
-type Watch = { repo: string; pr: string; url: string; head: string };
+// poller reads each watched PR's head once a minute. All watches live in one KV record: the free tier allows
+// 1,000 list calls a day and this runs 1,440 times, so one `get` a minute instead of a `list`.
+type Watch = { repo: string; pr: string; url: string; head: string; since: number };
+const WATCHES = "watches";
+const readWatches = async (env: Env) => JSON.parse((await env.SEEN.get(WATCHES)) ?? "{}") as Record<string, Watch>;
+const writeWatches = (env: Env, w: Record<string, Watch>) => env.SEEN.put(WATCHES, JSON.stringify(w));
 
 async function pollWatched(env: Env) {
-  const { keys } = await env.SEEN.list({ prefix: "watch:" });
-  for (const k of keys) {
-    const w = JSON.parse((await env.SEEN.get(k.name)) ?? "null") as Watch | null;
-    if (!w) continue;
+  const watches = await readWatches(env);
+  let changed = false;
+  for (const [key, w] of Object.entries(watches)) {
+    if (Date.now() - w.since > TRUST_TTL * 1000) {
+      delete watches[key];
+      changed = true;
+      continue;
+    }
     let pr: { state: string; head: { sha: string } };
     try {
       pr = (await gh(env.BOT_TOKEN, w.url)) as typeof pr;
     } catch (e) {
-      console.error(`watch ${k.name}: ${(e as Error).message}`);
+      console.error(`watch ${key}: ${(e as Error).message}`);
       continue;
     }
     if (pr.state !== "open") {
-      await env.SEEN.delete(k.name);
-      console.log(`watch ended, PR closed: ${k.name}`);
+      delete watches[key];
+      changed = true;
+      console.log(`watch ended, PR closed: ${key}`);
       continue;
     }
     if (pr.head.sha === w.head) continue;
-    console.log(`watch ${k.name}: new head ${pr.head.sha.slice(0, 7)}`);
-    await env.SEEN.put(k.name, JSON.stringify({ ...w, head: pr.head.sha }), { expirationTtl: TRUST_TTL });
+    console.log(`watch ${key}: new head ${pr.head.sha.slice(0, 7)}`);
+    watches[key] = { ...w, head: pr.head.sha };
+    changed = true;
     await dispatch(env, { repo: w.repo, pr: w.pr, requester: owner(env) });
   }
+  if (changed) await writeWatches(env, watches);
 }
 
 async function pollNotifications(env: Env) {
@@ -201,21 +212,23 @@ async function waitingRequest(env: Env, n: Notification, c: Comment): Promise<Pe
 // Start or stop the watch on a PR. The head stored is the current one, so the review that starts now does not
 // count as a push; the first new push does.
 async function watch(env: Env, n: Notification, on: boolean) {
-  const key = `watch:${prKey(n)}`;
+  const watches = await readWatches(env);
   if (!on) {
-    await env.SEEN.delete(key);
+    delete watches[prKey(n)];
+    await writeWatches(env, watches);
     console.log(`watch off: ${prKey(n)}`);
     return;
   }
   const pr = (await gh(env.BOT_TOKEN, n.subject.url)) as { head: { sha: string } };
-  const w: Watch = {
+  watches[prKey(n)] = {
     repo: n.repository.full_name,
     pr: String(n.subject.url.split("/").pop()),
     url: n.subject.url,
     head: pr.head.sha,
+    since: Date.now(),
   };
-  await env.SEEN.put(key, JSON.stringify(w), { expirationTtl: TRUST_TTL });
-  console.log(`watch on: ${prKey(n)} at ${w.head.slice(0, 7)}`);
+  await writeWatches(env, watches);
+  console.log(`watch on: ${prKey(n)} at ${pr.head.sha.slice(0, 7)}`);
 }
 
 async function handle(env: Env, n: Notification, c: Comment) {
