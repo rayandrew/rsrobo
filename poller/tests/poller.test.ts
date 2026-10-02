@@ -6,6 +6,7 @@ import { type Env, poll } from "../src/index.ts";
 function fakeGitHub(
   comments: { id: number; body: string; user: { login: string }; html_url?: string }[],
   type = "PullRequest",
+  opts: { reason?: string; requester?: string; state?: string } = {},
 ) {
   const calls: { method: string; url: string; body?: unknown }[] = [];
   const pr = "https://api.github.com/repos/o/r/pulls/7";
@@ -17,7 +18,7 @@ function fakeGitHub(
       return json([
         {
           id: "1",
-          reason: "mention",
+          reason: opts.reason ?? "mention",
           updated_at: "2026-09-30T00:00:00Z",
           subject: { type, url: pr, latest_comment_url: `${pr}/comment/${comments.at(-1)?.id}` },
           repository: { full_name: "o/r" },
@@ -26,6 +27,15 @@ function fakeGitHub(
     }
     if (url.includes("/comment/")) return json(comments.find((c) => url.endsWith(`/${c.id}`)));
     if (url.endsWith("/issues/7/comments?per_page=100")) return json(comments);
+    if (url.endsWith("/issues/7/timeline?per_page=100"))
+      return json([
+        {
+          event: "review_requested",
+          requested_reviewer: { login: "rsrobo" },
+          review_requester: { login: opts.requester },
+        },
+      ]);
+    if (url === pr) return json({ state: opts.state ?? "open" });
     return new Response(null, { status: 204 });
   }) as typeof fetch;
   return calls;
@@ -36,6 +46,7 @@ const env: Env = {
   SEEN: {
     get: async (k: string) => seen.get(k) ?? null,
     put: async (k: string, v: string) => void seen.set(k, v),
+    delete: async (k: string) => void seen.delete(k),
   } as unknown as KVNamespace,
   BOT_TOKEN: "b",
   USER_TOKEN: "u",
@@ -75,10 +86,10 @@ test("someone else's mention gets a reply and an inbox issue, no run", async () 
     if (!hit) throw new Error("request not made");
     return (hit.body as { body: string }).body;
   };
-  assert.match(
-    bodyOf((x) => x.method === "POST" && x.url.endsWith("/issues/7/comments")),
-    /Only @me can start a run/,
-  );
+  const reply = bodyOf((x) => x.method === "POST" && x.url.endsWith("/issues/7/comments"));
+  assert.match(reply, /Only @me can start a run of this bot, for the first review and for every later one/);
+  assert.match(reply, /\| @me \| `@rsrobo approve all` \| runs this request and trusts @stranger on this PR/);
+  assert.match(reply, /\| anyone \| .*re-request review \| asks for a run; @me is notified/);
   assert.match(
     bodyOf((x) => x.method === "POST" && x.url.endsWith("/repos/me/notes/issues")),
     /@rsrobo review model=opus/,
@@ -144,4 +155,70 @@ test("assess start is a pending review; assess finish and publish dispatch publi
   calls = fakeGitHub([{ id: 11, body: "@rsrobo assess finish", user: { login: "me" }, html_url: "" }]);
   await poll(env);
   assert.deepEqual(dispatches(calls), [{ repo: "o/r", pr: "7", task: "publish", requester: "me" }]);
+});
+
+test("approve all trusts the requester on this PR; revoke takes it back; a closed PR ends it", async () => {
+  seen.clear();
+  let calls = fakeGitHub([
+    { id: 20, body: "@rsrobo review", user: { login: "stranger" }, html_url: "https://x/20" },
+    { id: 21, body: "@rsrobo approve all model=sonnet", user: { login: "me" }, html_url: "" },
+  ]);
+  await poll(env);
+  assert.deepEqual(dispatches(calls), [{ repo: "o/r", pr: "7", requester: "me", model: "sonnet" }]);
+  assert.ok(seen.has("trust:o/r#7:stranger"));
+  // Trusted: their next request runs as them, with no reply and no inbox issue.
+  calls = fakeGitHub([{ id: 22, body: "@rsrobo review effort=medium", user: { login: "stranger" }, html_url: "" }]);
+  await poll(env);
+  assert.deepEqual(dispatches(calls), [{ repo: "o/r", pr: "7", requester: "stranger", effort: "medium" }]);
+  assert.ok(!calls.some((x) => x.method === "POST" && x.url.endsWith("/issues/7/comments")));
+  // Another person on the same PR still waits.
+  calls = fakeGitHub([{ id: 23, body: "@rsrobo review", user: { login: "other" }, html_url: "https://x/23" }]);
+  await poll(env);
+  assert.equal(dispatches(calls).length, 0);
+  // A closed PR ends the trust.
+  calls = fakeGitHub([{ id: 24, body: "@rsrobo review", user: { login: "stranger" }, html_url: "" }], "PullRequest", {
+    state: "closed",
+  });
+  await poll(env);
+  assert.equal(dispatches(calls).length, 0);
+  // revoke
+  calls = fakeGitHub([{ id: 25, body: "@rsrobo revoke user=stranger", user: { login: "me" }, html_url: "" }]);
+  await poll(env);
+  assert.ok(!seen.has("trust:o/r#7:stranger"));
+  calls = fakeGitHub([{ id: 26, body: "@rsrobo review", user: { login: "stranger" }, html_url: "https://x/26" }]);
+  await poll(env);
+  assert.equal(dispatches(calls).length, 0);
+});
+
+test("a review request from someone else waits for me; mine runs; approve with nothing waiting means review", async () => {
+  seen.clear();
+  let calls = fakeGitHub([], "PullRequest", { reason: "review_requested", requester: "stranger" });
+  await poll(env);
+  assert.equal(dispatches(calls).length, 0);
+  assert.ok(calls.some((x) => x.method === "POST" && x.url.endsWith("/issues/7/comments")));
+  assert.ok(calls.some((x) => x.method === "POST" && x.url.endsWith("/repos/me/notes/issues")));
+  // approve runs the waiting request, a review, with my options.
+  calls = fakeGitHub([{ id: 30, body: "@rsrobo approve budget=1", user: { login: "me" }, html_url: "" }]);
+  await poll(env);
+  assert.deepEqual(dispatches(calls), [{ repo: "o/r", pr: "7", requester: "me", budget: "1" }]);
+  // My own review request runs at once.
+  seen.clear();
+  calls = fakeGitHub([], "PullRequest", { reason: "review_requested", requester: "me" });
+  await poll(env);
+  assert.deepEqual(dispatches(calls), [{ repo: "o/r", pr: "7", requester: "me" }]);
+});
+
+test("a second request on the same PR gets no second reply while the first waits", async () => {
+  seen.clear();
+  let calls = fakeGitHub([{ id: 40, body: "@rsrobo review", user: { login: "stranger" }, html_url: "https://x/40" }]);
+  await poll(env);
+  assert.equal(calls.filter((x) => x.method === "POST" && x.url.endsWith("/issues/7/comments")).length, 1);
+  calls = fakeGitHub([{ id: 41, body: "@rsrobo fix 1", user: { login: "stranger" }, html_url: "https://x/41" }]);
+  await poll(env);
+  assert.equal(calls.filter((x) => x.method === "POST" && x.url.endsWith("/issues/7/comments")).length, 0);
+  assert.equal(
+    JSON.parse(seen.get("pending:o/r#7") ?? "{}").body,
+    "@rsrobo fix 1",
+    "the newest request is the one approve runs",
+  );
 });

@@ -23,6 +23,8 @@ type Notification = {
 type Comment = { id: number; body: string; html_url: string; user: { login: string } };
 
 const SEEN_TTL = 60 * 60 * 24 * 30;
+// `approve all` trusts one person on one PR for this long at most; a closed PR ends it earlier.
+const TRUST_TTL = 60 * 60 * 24 * 30;
 
 export default {
   async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext) {
@@ -46,14 +48,9 @@ export async function poll(env: Env) {
         await env.SEEN.put(`comment:${comment.id}`, "1", { expirationTtl: SEEN_TTL });
       }
     } else if (n.reason === "review_requested") {
-      // A review request from the PR page (own repos only; the bot must be a collaborator) means `review` with defaults.
       const key = `request:${n.subject.url}:${n.updated_at}`;
-      if (
-        !(await env.SEEN.get(key)) &&
-        env.ALLOWED_REPOS.split(",").some((g) => glob(g, n.repository.full_name)) &&
-        (await requestedByAllowed(env, n))
-      ) {
-        await dispatch(env, { repo: n.repository.full_name, pr: String(n.subject.url.split("/").pop()) });
+      if (!(await env.SEEN.get(key)) && env.ALLOWED_REPOS.split(",").some((g) => glob(g, n.repository.full_name))) {
+        await handleRequest(env, n);
       }
       await env.SEEN.put(key, "1", { expirationTtl: SEEN_TTL });
     } else continue;
@@ -74,10 +71,24 @@ async function findMention(env: Env, n: Notification): Promise<Comment | null> {
   return recent.reverse().find((c) => mention.test(c.body)) ?? null;
 }
 
-// The notification does not say who asked; the PR timeline does. Only an allowed commenter may request the bot.
-async function requestedByAllowed(env: Env, n: Notification): Promise<boolean> {
-  const url = `${n.subject.url.replace("/pulls/", "/issues/")}/timeline?per_page=100`;
-  const events = (await gh(env.BOT_TOKEN, url)) as {
+const owners = (env: Env) => env.ALLOWED_COMMENTERS.split(",");
+const owner = (env: Env) => owners(env)[0];
+const issueUrl = (n: Notification) => n.subject.url.replace("/pulls/", "/issues/");
+const prKey = (n: Notification) => `${n.repository.full_name}#${n.subject.url.split("/").pop()}`;
+
+// Someone I trusted with `approve all` on this PR, while the PR is open.
+async function trusted(env: Env, n: Notification, login: string): Promise<boolean> {
+  if (!(await env.SEEN.get(`trust:${prKey(n)}:${login}`))) return false;
+  const pr = (await gh(env.BOT_TOKEN, n.subject.url)) as { state?: string };
+  return pr.state === "open";
+}
+
+// A request from someone else that waits for me: who asked and what, so `approve` can run it.
+type Pending = { login: string; body: string; html_url: string };
+
+// A review request from the PR page. The notification does not say who asked; the PR timeline does.
+async function handleRequest(env: Env, n: Notification) {
+  const events = (await gh(env.BOT_TOKEN, `${issueUrl(n)}/timeline?per_page=100`)) as {
     event: string;
     review_requester?: { login: string };
     requested_reviewer?: { login: string };
@@ -85,39 +96,86 @@ async function requestedByAllowed(env: Env, n: Notification): Promise<boolean> {
   const last = events
     .filter((e) => e.event === "review_requested" && e.requested_reviewer?.login === env.BOT_LOGIN)
     .pop();
-  const ok = !!last && env.ALLOWED_COMMENTERS.split(",").includes(last.review_requester?.login ?? "");
-  if (last && !ok) {
-    const repo = n.repository.full_name;
-    const pr = n.subject.url.split("/").pop();
+  const login = last?.review_requester?.login;
+  console.log(`review request on ${n.subject.url} by ${login ?? "-"}`);
+  if (!login) return;
+  const repo = n.repository.full_name;
+  const pr = String(n.subject.url.split("/").pop());
+  if (owners(env).includes(login) || (await trusted(env, n, login))) {
+    await dispatch(env, { repo, pr, requester: login });
+    return;
+  }
+  await waitForMe(env, n, {
+    login,
+    body: `@${env.BOT_LOGIN} review`,
+    html_url: `https://github.com/${repo}/pull/${pr}`,
+  });
+}
+
+// Reply once on the PR, with the commands each side can use, and put the request in my inbox.
+// The @mention of me in the reply is what notifies me; an issue my own token opens does not.
+async function waitForMe(env: Env, n: Notification, p: Pending) {
+  await env.SEEN.put(`pending:${prKey(n)}`, JSON.stringify(p), { expirationTtl: SEEN_TTL });
+  const me = owner(env);
+  const bot = env.BOT_LOGIN;
+  if (await env.SEEN.get(`waiting:${prKey(n)}`)) {
+    console.log(`request by ${p.login} on ${prKey(n)} replaces the waiting one; no second reply`);
+    return;
+  }
+  const reply = [
+    `Thanks @${p.login}. Only @${me} can start a run of this bot, for the first review and for every later one. They have been notified.`,
+    "",
+    "| Who | Comment | What happens |",
+    "|---|---|---|",
+    `| @${me} | \`@${bot} approve\` | runs this request as asked |`,
+    `| @${me} | \`@${bot} approve model=haiku budget=1\` | runs it with changed options |`,
+    `| @${me} | \`@${bot} approve all\` | runs this request and trusts @${p.login} on this PR for later ones |`,
+    `| @${me} | \`@${bot} review\`, \`@${bot} assess start\`, \`@${bot} fix 2\`, \`@${bot} ask <question>\` | runs a command directly |`,
+    `| anyone | \`@${bot} review\`, \`@${bot} fix 2\`, \`@${bot} ask <question>\`, or re-request review | asks for a run; @${me} is notified and decides |`,
+    "",
+    `Any later review on this PR also needs @${me}, unless they say \`approve all\`.`,
+  ].join("\n");
+  try {
+    await gh(env.BOT_TOKEN, `${issueUrl(n)}/comments`, "POST", { body: reply });
+    await env.SEEN.put(`waiting:${prKey(n)}`, "1", { expirationTtl: SEEN_TTL });
+  } catch (e) {
+    console.error(`reply on ${prKey(n)} failed: ${(e as Error).message}`);
+  }
+  try {
     await inbox(
       env,
-      `rsrobo: review request from @${last.review_requester?.login} on ${repo}#${pr}`,
-      `https://github.com/${repo}/pull/${pr}\n\nTo run it, comment \`@${env.BOT_LOGIN} review\` on the PR.`,
+      `rsrobo: request from @${p.login} on ${prKey(n)}`,
+      `${p.html_url}\n\nThey asked:\n\n> ${p.body}\n\nTo run it, comment on the PR:\n\n\`\`\`\n@${bot} approve\n\`\`\`\n\n\`@${bot} approve all\` also trusts @${p.login} on this PR. \`@${bot} revoke\` takes that back.`,
     );
+  } catch (e) {
+    console.error(`inbox for ${prKey(n)} failed: ${(e as Error).message}`);
   }
-  return ok;
+}
+
+// The request that waits on this PR: the one `waitForMe` stored, or, when the poller never saw it (a comment
+// from before a deploy, two comments in one poll), the latest mention by someone else before `c`.
+async function waitingRequest(env: Env, n: Notification, c: Comment): Promise<Pending | null> {
+  const stored = JSON.parse((await env.SEEN.get(`pending:${prKey(n)}`)) ?? "null") as Pending | null;
+  if (stored) return stored;
+  const all = (await gh(env.BOT_TOKEN, `${issueUrl(n)}/comments?per_page=100`)) as Comment[];
+  const mention = new RegExp(`@${env.BOT_LOGIN}\\b`, "i");
+  const theirs = all.filter((x) => x.id < c.id && mention.test(x.body) && !owners(env).includes(x.user.login)).pop();
+  return theirs ? { login: theirs.user.login, body: theirs.body, html_url: theirs.html_url } : null;
 }
 
 async function handle(env: Env, n: Notification, c: Comment) {
   const repo = n.repository.full_name;
   const pr = n.subject.url.split("/").pop();
-  // Someone else asked: say so once on the PR, and put the request in my inbox with the command to approve it.
-  if (!env.ALLOWED_COMMENTERS.split(",").includes(c.user.login)) {
+  if (!env.ALLOWED_REPOS.split(",").some((g) => glob(g, repo))) return;
+  const mine = owners(env).includes(c.user.login);
+  if (!mine && !(await trusted(env, n, c.user.login))) {
     const command = c.body
       .slice(c.body.search(new RegExp(`@${env.BOT_LOGIN}`, "i")))
       .split("\n")[0]
       .trim();
-    await gh(env.BOT_TOKEN, `${n.subject.url.replace("/pulls/", "/issues/")}/comments`, "POST", {
-      body: `Thanks @${c.user.login}. Only @${env.ALLOWED_COMMENTERS.split(",")[0]} can start a run of this bot; they have been notified and can approve it.`,
-    });
-    await inbox(
-      env,
-      `rsrobo: request from @${c.user.login} on ${repo}#${pr}`,
-      `${c.html_url}\n\nThey wrote:\n\n> ${command}\n\nTo run it, comment this on the PR:\n\n\`\`\`\n${command}\n\`\`\``,
-    );
+    await waitForMe(env, n, { login: c.user.login, body: command, html_url: c.html_url });
     return;
   }
-  if (!env.ALLOWED_REPOS.split(",").some((g) => glob(g, repo))) return;
 
   let spec: ReturnType<typeof parseCommand>;
   try {
@@ -127,33 +185,51 @@ async function handle(env: Env, n: Notification, c: Comment) {
     return;
   }
   if (!spec) return;
-  // `approve [key=value ...]`: run the most recent request someone else made on this PR. My keys replace theirs,
-  // so `approve model=sonnet effort=medium` caps what they asked for.
+  if (!mine && (spec.task === "approve" || spec.task === "revoke")) {
+    await inbox(
+      env,
+      `rsrobo: ${spec.task} by @${c.user.login} on ${repo}#${pr}`,
+      `${c.html_url}\n\nOnly I can do that.`,
+    );
+    return;
+  }
+  // `revoke [user=<login>]`: take back `approve all` for that person on this PR.
+  if (spec.task === "revoke") {
+    const pending = await waitingRequest(env, n, c);
+    const who = spec.args.user ?? pending?.login;
+    if (!who) {
+      await inbox(env, `rsrobo: revoke on ${repo}#${pr} names nobody`, `${c.html_url}\n\nUse \`revoke user=<login>\`.`);
+      return;
+    }
+    await env.SEEN.delete(`trust:${prKey(n)}:${who}`);
+    console.log(`trust revoked for ${who} on ${prKey(n)}`);
+    return;
+  }
+  // `approve [all] [user=<login>] [key=value ...]`: run the request that waits on this PR. My keys replace theirs,
+  // so `approve model=sonnet effort=medium` caps what they asked for. `all` also trusts them here from now on.
   if (spec.task === "approve") {
-    const all = (await gh(
-      env.BOT_TOKEN,
-      `${n.subject.url.replace("/pulls/", "/issues/")}/comments?per_page=100`,
-    )) as Comment[];
-    const mention = new RegExp(`@${env.BOT_LOGIN}\\b`, "i");
-    const theirs = all
-      .filter((x) => x.id < c.id && mention.test(x.body) && !env.ALLOWED_COMMENTERS.split(",").includes(x.user.login))
-      .pop();
+    const pending = await waitingRequest(env, n, c);
+    const who = spec.args.user ?? pending?.login;
+    if (/^all\b/.test(spec.text) && who) {
+      await env.SEEN.put(`trust:${prKey(n)}:${who}`, "1", { expirationTtl: TRUST_TTL });
+      console.log(`trust granted to ${who} on ${prKey(n)}`);
+    }
+    const { user: _user, ...overrides } = spec.args;
     let want: ReturnType<typeof parseCommand> = null;
     try {
-      want = theirs ? parseCommand(theirs.body, env.BOT_LOGIN) : null;
+      want = pending ? parseCommand(pending.body, env.BOT_LOGIN) : null;
     } catch (e) {
-      await inbox(env, `rsrobo: cannot approve on ${repo}#${pr}`, `${theirs?.html_url}\n\n${(e as Error).message}`);
+      await inbox(env, `rsrobo: cannot approve on ${repo}#${pr}`, `${pending?.html_url}\n\n${(e as Error).message}`);
       return;
     }
-    if (!want) {
-      await inbox(
-        env,
-        `rsrobo: nothing to approve on ${repo}#${pr}`,
-        `${c.html_url}\n\nNo request from someone else was found.`,
-      );
-      return;
-    }
-    await run(env, n, c, { ...want, args: { ...want.args, ...spec.args } });
+    await env.SEEN.delete(`pending:${prKey(n)}`);
+    await env.SEEN.delete(`waiting:${prKey(n)}`);
+    await run(
+      env,
+      n,
+      c,
+      want ? { ...want, args: { ...want.args, ...overrides } } : { task: "review", args: overrides, text: "" },
+    );
     return;
   }
   await run(env, n, c, spec);

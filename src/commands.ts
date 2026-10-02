@@ -16,6 +16,7 @@ export const KNOWN_KEYS = new Set([
   "tests",
   "effort",
   "as",
+  "user",
 ]);
 const TASKS = new Set([
   "review",
@@ -31,6 +32,7 @@ const TASKS = new Set([
   "approve",
   "assess",
   "publish",
+  "revoke",
 ]);
 const TOKEN = /^[A-Za-z0-9_.,*~/\-$]+$/;
 
