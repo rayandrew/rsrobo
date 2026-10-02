@@ -21,7 +21,7 @@ What goes into a notes file, from the published evidence: commands with flags fi
 
 ## Hub workflow
 
-`.github/workflows/review.yml` runs the same CLI on `workflow_dispatch`. Secrets: `USER_TOKEN` (classic PAT, `repo` + `workflow`), `BOT_TOKEN` (bot account classic PAT, `notifications` + `public_repo`), `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`).
+`.github/workflows/review.yml` runs the same CLI on `workflow_dispatch`. The `review` job never pushes to the notes repo: it uploads what it wrote as an artifact, and the `notes` job, one at a time across all runs, pushes it with a rebase-and-retry loop and then deletes the artifact. The `lessons` job does the same for the kb. Secrets: `USER_TOKEN` (classic PAT, `repo` + `workflow`), `BOT_TOKEN` (bot account classic PAT, `notifications` + `public_repo`), `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`).
 
 ```
 gh workflow run review.yml -f repo=owner/name -f pr=N -f post=inbox
