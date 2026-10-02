@@ -180,8 +180,9 @@ jobs:
           REPO: ${{ inputs.repo }}
           PR: ${{ inputs.pr }}
           TASK: ${{ inputs.task }}
-      # The artifact is a courier, not an archive: once pushed, it goes.
-      - if: steps.changes.outcome == 'success'
+      # The artifact is a courier, not an archive: once the push succeeded, it goes. On a failure it stays,
+      # so the files can be recovered from the run page.
+      - if: success() && steps.changes.outcome == 'success'
         run: |
           gh api -X GET "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" -q '.artifacts[]|select(.name=="notes-changes")|.id' |
             xargs -r -I{} gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/{}"
@@ -224,7 +225,8 @@ jobs:
           USER_TOKEN: ${{ secrets.USER_TOKEN }}
           GH_TOKEN: ${{ secrets.USER_TOKEN }}
           RKB_AUTO_CONFIRM: continue
-      - if: always()
+      # Deleted only after the lessons were written; on a failure it stays for a rerun.
+      - if: success()
         run: |
           gh api -X GET "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" -q '.artifacts[]|select(.name=="review-json")|.id' |
             xargs -r -I{} gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/{}"
