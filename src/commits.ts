@@ -36,7 +36,6 @@ const TOOL_EMAIL =
   /@(anthropic\.com|openai\.com|cursor\.(sh|com)|devin\.ai|windsurf\.com|cognition\.ai)\b|copilot@github\.com|\[bot\]/i;
 const PRODUCT =
   /\b(claude code|claude (opus|sonnet|haiku)|github copilot|copilot (agent|swe)|chatgpt|openai codex|codex (cli|agent)|cursor agent|gemini (cli|code assist)|devin ai|claude\.ai|anthropic claude)\b/i;
-/\b(claude|anthropic|copilot|chatgpt|openai|codex|gemini|cursor|windsurf|devin|aider|cline|roo|sweep|jules|opencode|pi\.dev|llm|ai)\b/i;
 const TRAILER = /^(co-authored-by|assisted-by|generated-by|ai-generated|made-with|authored-with):\s*(.*)$/i;
 const BADGE =
   /^(generated|made|written|created|authored|assisted) (with|by) (claude|copilot|chatgpt|codex|gemini|cursor|an? ai|ai)\b|🤖/i;
