@@ -33,6 +33,8 @@ const TASKS = new Set([
   "assess",
   "publish",
   "revoke",
+  "watch",
+  "unwatch",
 ]);
 const TOKEN = /^[A-Za-z0-9_.,*~/\-$]+$/;
 

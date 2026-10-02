@@ -23,7 +23,7 @@ type Notification = {
 type Comment = { id: number; body: string; html_url: string; user: { login: string } };
 
 const SEEN_TTL = 60 * 60 * 24 * 30;
-// `approve all` trusts one person on one PR for this long at most; a closed PR ends it earlier.
+// `approve all` and `watch` last this long at most on one PR; a closed PR ends them earlier.
 const TRUST_TTL = 60 * 60 * 24 * 30;
 
 export default {
@@ -33,6 +33,39 @@ export default {
 };
 
 export async function poll(env: Env) {
+  await pollNotifications(env);
+  await pollWatched(env);
+}
+
+// A watched PR gets an incremental review after every push. GitHub sends no notification for a push, so the
+// poller reads each watched PR's head once a minute. The record holds the last head it dispatched for.
+type Watch = { repo: string; pr: string; url: string; head: string };
+
+async function pollWatched(env: Env) {
+  const { keys } = await env.SEEN.list({ prefix: "watch:" });
+  for (const k of keys) {
+    const w = JSON.parse((await env.SEEN.get(k.name)) ?? "null") as Watch | null;
+    if (!w) continue;
+    let pr: { state: string; head: { sha: string } };
+    try {
+      pr = (await gh(env.BOT_TOKEN, w.url)) as typeof pr;
+    } catch (e) {
+      console.error(`watch ${k.name}: ${(e as Error).message}`);
+      continue;
+    }
+    if (pr.state !== "open") {
+      await env.SEEN.delete(k.name);
+      console.log(`watch ended, PR closed: ${k.name}`);
+      continue;
+    }
+    if (pr.head.sha === w.head) continue;
+    console.log(`watch ${k.name}: new head ${pr.head.sha.slice(0, 7)}`);
+    await env.SEEN.put(k.name, JSON.stringify({ ...w, head: pr.head.sha }), { expirationTtl: TRUST_TTL });
+    await dispatch(env, { repo: w.repo, pr: w.pr, requester: owner(env) });
+  }
+}
+
+async function pollNotifications(env: Env) {
   const notes = (await gh(env.BOT_TOKEN, "/notifications?participating=true")) as Notification[];
   console.log(
     `notifications: ${notes.length}${notes.map((n) => ` [${n.reason} ${n.subject.type} ${n.repository.full_name}]`).join("")}`,
@@ -130,10 +163,12 @@ async function waitForMe(env: Env, n: Notification, p: Pending) {
     `| @${me} | \`@${bot} approve\` | runs this request as asked |`,
     `| @${me} | \`@${bot} approve model=haiku budget=1\` | runs it with changed options |`,
     `| @${me} | \`@${bot} approve all\` | runs this request and trusts @${p.login} on this PR for later ones |`,
+    `| @${me} | \`@${bot} approve watch\` | runs this request and reviews this PR again after every push |`,
+    `| @${me} | \`@${bot} approve all watch\` | both |`,
     `| @${me} | \`@${bot} review\`, \`@${bot} assess start\`, \`@${bot} fix 2\`, \`@${bot} ask <question>\` | runs a command directly |`,
     `| anyone | \`@${bot} review\`, \`@${bot} fix 2\`, \`@${bot} ask <question>\`, or re-request review | asks for a run; @${me} is notified and decides |`,
     "",
-    `Any later review on this PR also needs @${me}, unless they say \`approve all\`.`,
+    `Any later review on this PR also needs @${me}, unless they say \`approve all\` or \`approve watch\`.`,
   ].join("\n");
   try {
     await gh(env.BOT_TOKEN, `${issueUrl(n)}/comments`, "POST", { body: reply });
@@ -163,6 +198,26 @@ async function waitingRequest(env: Env, n: Notification, c: Comment): Promise<Pe
   return theirs ? { login: theirs.user.login, body: theirs.body, html_url: theirs.html_url } : null;
 }
 
+// Start or stop the watch on a PR. The head stored is the current one, so the review that starts now does not
+// count as a push; the first new push does.
+async function watch(env: Env, n: Notification, on: boolean) {
+  const key = `watch:${prKey(n)}`;
+  if (!on) {
+    await env.SEEN.delete(key);
+    console.log(`watch off: ${prKey(n)}`);
+    return;
+  }
+  const pr = (await gh(env.BOT_TOKEN, n.subject.url)) as { head: { sha: string } };
+  const w: Watch = {
+    repo: n.repository.full_name,
+    pr: String(n.subject.url.split("/").pop()),
+    url: n.subject.url,
+    head: pr.head.sha,
+  };
+  await env.SEEN.put(key, JSON.stringify(w), { expirationTtl: TRUST_TTL });
+  console.log(`watch on: ${prKey(n)} at ${w.head.slice(0, 7)}`);
+}
+
 async function handle(env: Env, n: Notification, c: Comment) {
   const repo = n.repository.full_name;
   const pr = n.subject.url.split("/").pop();
@@ -185,12 +240,21 @@ async function handle(env: Env, n: Notification, c: Comment) {
     return;
   }
   if (!spec) return;
-  if (!mine && (spec.task === "approve" || spec.task === "revoke")) {
+  if (!mine && ["approve", "revoke", "watch", "unwatch"].includes(spec.task)) {
     await inbox(
       env,
       `rsrobo: ${spec.task} by @${c.user.login} on ${repo}#${pr}`,
       `${c.html_url}\n\nOnly I can do that.`,
     );
+    return;
+  }
+  // `watch` and `unwatch`: review this PR again after every push, or stop that.
+  if (spec.task === "watch" || spec.task === "unwatch") {
+    if (n.subject.type !== "PullRequest") {
+      await inbox(env, `rsrobo: ${spec.task} needs a pull request`, c.html_url);
+      return;
+    }
+    await watch(env, n, spec.task === "watch");
     return;
   }
   // `revoke [user=<login>]`: take back `approve all` for that person on this PR.
@@ -210,10 +274,12 @@ async function handle(env: Env, n: Notification, c: Comment) {
   if (spec.task === "approve") {
     const pending = await waitingRequest(env, n, c);
     const who = spec.args.user ?? pending?.login;
-    if (/^all\b/.test(spec.text) && who) {
+    const words = spec.text.split(/\s+/);
+    if (words.includes("all") && who) {
       await env.SEEN.put(`trust:${prKey(n)}:${who}`, "1", { expirationTtl: TRUST_TTL });
       console.log(`trust granted to ${who} on ${prKey(n)}`);
     }
+    if (words.includes("watch")) await watch(env, n, true);
     const { user: _user, ...overrides } = spec.args;
     let want: ReturnType<typeof parseCommand> = null;
     try {

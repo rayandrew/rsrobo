@@ -6,7 +6,7 @@ import { type Env, poll } from "../src/index.ts";
 function fakeGitHub(
   comments: { id: number; body: string; user: { login: string }; html_url?: string }[],
   type = "PullRequest",
-  opts: { reason?: string; requester?: string; state?: string } = {},
+  opts: { reason?: string; requester?: string; state?: string; head?: string } = {},
 ) {
   const calls: { method: string; url: string; body?: unknown }[] = [];
   const pr = "https://api.github.com/repos/o/r/pulls/7";
@@ -35,7 +35,7 @@ function fakeGitHub(
           review_requester: { login: opts.requester },
         },
       ]);
-    if (url === pr) return json({ state: opts.state ?? "open" });
+    if (url === pr) return json({ state: opts.state ?? "open", head: { sha: opts.head ?? "h1" } });
     return new Response(null, { status: 204 });
   }) as typeof fetch;
   return calls;
@@ -47,6 +47,9 @@ const env: Env = {
     get: async (k: string) => seen.get(k) ?? null,
     put: async (k: string, v: string) => void seen.set(k, v),
     delete: async (k: string) => void seen.delete(k),
+    list: async ({ prefix }: { prefix: string }) => ({
+      keys: [...seen.keys()].filter((k) => k.startsWith(prefix)).map((name) => ({ name })),
+    }),
   } as unknown as KVNamespace,
   BOT_TOKEN: "b",
   USER_TOKEN: "u",
@@ -221,4 +224,54 @@ test("a second request on the same PR gets no second reply while the first waits
     "@rsrobo fix 1",
     "the newest request is the one approve runs",
   );
+});
+
+test("approve watch reviews the PR again after each push, once per push, until it closes", async () => {
+  seen.clear();
+  let calls = fakeGitHub([
+    { id: 50, body: "@rsrobo review", user: { login: "stranger" }, html_url: "https://x/50" },
+    { id: 51, body: "@rsrobo approve watch", user: { login: "me" }, html_url: "" },
+  ]);
+  await poll(env);
+  assert.deepEqual(dispatches(calls), [{ repo: "o/r", pr: "7", requester: "me" }]);
+  assert.equal(JSON.parse(seen.get("watch:o/r#7") ?? "{}").head, "h1");
+  // Same head: nothing. The stranger's own request still waits.
+  calls = fakeGitHub([{ id: 52, body: "@rsrobo review", user: { login: "stranger" }, html_url: "https://x/52" }]);
+  await poll(env);
+  assert.equal(dispatches(calls).length, 0);
+  // A push: one review, then quiet at that head.
+  calls = fakeGitHub([], "PullRequest", { reason: "subscribed", head: "h2" });
+  await poll(env);
+  assert.deepEqual(dispatches(calls), [{ repo: "o/r", pr: "7", requester: "me" }]);
+  calls = fakeGitHub([], "PullRequest", { reason: "subscribed", head: "h2" });
+  await poll(env);
+  assert.equal(dispatches(calls).length, 0);
+  // Closed: the watch ends.
+  calls = fakeGitHub([], "PullRequest", { reason: "subscribed", head: "h3", state: "closed" });
+  await poll(env);
+  assert.equal(dispatches(calls).length, 0);
+  assert.ok(!seen.has("watch:o/r#7"));
+});
+
+test("watch and unwatch on their own; approve all watch does both", async () => {
+  seen.clear();
+  let calls = fakeGitHub([{ id: 60, body: "@rsrobo watch", user: { login: "me" }, html_url: "" }]);
+  await poll(env);
+  assert.equal(dispatches(calls).length, 0);
+  assert.ok(seen.has("watch:o/r#7"));
+  calls = fakeGitHub([{ id: 61, body: "@rsrobo unwatch", user: { login: "me" }, html_url: "" }]);
+  await poll(env);
+  assert.ok(!seen.has("watch:o/r#7"));
+  calls = fakeGitHub([
+    { id: 62, body: "@rsrobo review", user: { login: "stranger" }, html_url: "https://x/62" },
+    { id: 63, body: "@rsrobo approve all watch", user: { login: "me" }, html_url: "" },
+  ]);
+  await poll(env);
+  assert.equal(dispatches(calls).length, 1);
+  assert.ok(seen.has("watch:o/r#7"));
+  assert.ok(seen.has("trust:o/r#7:stranger"));
+  // A stranger cannot watch.
+  calls = fakeGitHub([{ id: 64, body: "@rsrobo watch", user: { login: "stranger" }, html_url: "https://x/64" }]);
+  await poll(env);
+  assert.ok(!calls.some((x) => x.url.endsWith("/dispatches")));
 });
